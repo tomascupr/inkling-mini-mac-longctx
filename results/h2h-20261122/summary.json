@@ -1,34 +1,254 @@
-{
- "4k prompt": {
-  "mlxserve_prefill_decode": [
-   [
-    1012.4,
-    66.1
-   ]
+[
+ {
+  "prompt": 4078,
+  "label": "4k",
+  "metric": "reading",
+  "sessions": [
+   {
+    "session": "h29",
+    "started": "2026-11-22 22:33 CET",
+    "mlxserve": [
+     1039.3,
+     1027.6,
+     1036.6
+    ],
+    "ours": [
+     1041.5,
+     1039.7
+    ],
+    "first": 893.2,
+    "delta": 0.5896568390526824,
+    "verdict": "ahead",
+    "delta_with_first": -4.159819558562913,
+    "verdict_with_first": "level"
+   },
+   {
+    "session": "h30",
+    "started": "2026-11-22 22:42 CET",
+    "mlxserve": [
+     1037.0,
+     1034.2,
+     1042.1
+    ],
+    "ours": [
+     1042.0,
+     1036.3
+    ],
+    "first": 855.4,
+    "delta": 0.13329907172453667,
+    "verdict": "level",
+    "delta_with_first": -5.768798381138985,
+    "verdict_with_first": "level"
+   }
   ],
-  "ours_prefill": [
-   978.9,
-   980.3
+  "mlxserve": [
+   1039.3,
+   1027.6,
+   1036.6,
+   1037.0,
+   1034.2,
+   1042.1
   ],
-  "ours_decode": [
-   68.2,
-   68.9
-  ]
+  "ours": [
+   1041.5,
+   1039.7,
+   1042.0,
+   1036.3
+  ],
+  "mlxserve_mean": 1036.1333333333334,
+  "ours_mean": 1039.875,
+  "delta": 0.36111826019817267,
+  "verdict": "level",
+  "delta_with_first": -4.965577145798481,
+  "verdict_with_first": "level"
  },
- "32k prompt": {
-  "mlxserve_prefill_decode": [
-   [
-    877.3,
-    74.8
-   ]
+ {
+  "prompt": 4078,
+  "label": "4k",
+  "metric": "writing",
+  "sessions": [
+   {
+    "session": "h29",
+    "started": "2026-11-22 22:33 CET",
+    "mlxserve": [
+     76.5,
+     76.6,
+     76.1
+    ],
+    "ours": [
+     80.1,
+     80.5
+    ],
+    "first": 70.2,
+    "delta": 5.104712041884817,
+    "verdict": "ahead",
+    "delta_with_first": 0.6980802792321117,
+    "verdict_with_first": "level"
+   },
+   {
+    "session": "h30",
+    "started": "2026-11-22 22:42 CET",
+    "mlxserve": [
+     75.6,
+     76.1,
+     76.8
+    ],
+    "ours": [
+     80.2,
+     81.1
+    ],
+    "first": 69.2,
+    "delta": 5.886214442013129,
+    "verdict": "ahead",
+    "delta_with_first": 0.87527352297593,
+    "verdict_with_first": "level"
+   }
   ],
-  "ours_prefill": [
-   861.7,
-   861.4
+  "mlxserve": [
+   76.5,
+   76.6,
+   76.1,
+   75.6,
+   76.1,
+   76.8
   ],
-  "ours_decode": [
-   63.2,
-   63.1
-  ]
+  "ours": [
+   80.1,
+   80.5,
+   80.2,
+   81.1
+  ],
+  "mlxserve_mean": 76.28333333333333,
+  "ours_mean": 80.475,
+  "delta": 5.494865632510378,
+  "verdict": "faster",
+  "delta_with_first": 0.7865414026655014,
+  "verdict_with_first": "level"
+ },
+ {
+  "prompt": 32750,
+  "label": "32k",
+  "metric": "reading",
+  "sessions": [
+   {
+    "session": "h29",
+    "started": "2026-11-22 22:33 CET",
+    "mlxserve": [
+     898.3,
+     898.1,
+     897.8
+    ],
+    "ours": [
+     927.4,
+     928.2
+    ],
+    "first": 928.8,
+    "delta": 3.3108158265904537,
+    "verdict": "ahead",
+    "delta_with_first": 3.347932595946849,
+    "verdict_with_first": "ahead"
+   },
+   {
+    "session": "h30",
+    "started": "2026-11-22 22:42 CET",
+    "mlxserve": [
+     898.9,
+     899.0,
+     898.4
+    ],
+    "ours": [
+     927.3,
+     928.5
+    ],
+    "first": 926.7,
+    "delta": 3.2414790639023847,
+    "verdict": "ahead",
+    "delta_with_first": 3.1969736305307275,
+    "verdict_with_first": "ahead"
+   }
+  ],
+  "mlxserve": [
+   898.3,
+   898.1,
+   897.8,
+   898.9,
+   899.0,
+   898.4
+  ],
+  "ours": [
+   927.4,
+   928.2,
+   927.3,
+   928.5
+  ],
+  "mlxserve_mean": 898.4166666666666,
+  "ours_mean": 927.85,
+  "delta": 3.276133939337724,
+  "verdict": "faster",
+  "delta_with_first": 3.2724237083758463,
+  "verdict_with_first": "faster"
+ },
+ {
+  "prompt": 32750,
+  "label": "32k",
+  "metric": "writing",
+  "sessions": [
+   {
+    "session": "h29",
+    "started": "2026-11-22 22:33 CET",
+    "mlxserve": [
+     74.1,
+     72.3,
+     74.2
+    ],
+    "ours": [
+     75.1,
+     75.7
+    ],
+    "first": 69.0,
+    "delta": 2.5385312783318223,
+    "verdict": "ahead",
+    "delta_with_first": -0.3626473254759746,
+    "verdict_with_first": "level"
+   },
+   {
+    "session": "h30",
+    "started": "2026-11-22 22:42 CET",
+    "mlxserve": [
+     70.9,
+     72.0,
+     71.6
+    ],
+    "ours": [
+     75.4,
+     76.6
+    ],
+    "first": 70.2,
+    "delta": 6.293706293706293,
+    "verdict": "ahead",
+    "delta_with_first": 3.58974358974359,
+    "verdict_with_first": "level"
+   }
+  ],
+  "mlxserve": [
+   74.1,
+   72.3,
+   74.2,
+   70.9,
+   72.0,
+   71.6
+  ],
+  "ours": [
+   75.1,
+   75.7,
+   75.4,
+   76.6
+  ],
+  "mlxserve_mean": 72.51666666666667,
+  "ours_mean": 75.7,
+  "delta": 4.389795449321995,
+  "verdict": "faster",
+  "delta_with_first": 1.5858423350953803,
+  "verdict_with_first": "level"
  }
-}
+]

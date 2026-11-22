@@ -1,10 +1,26 @@
 {
- "mlxserve_log": "mlxserve-draft-on.log",
- "ours_reading_log": "srv-f2k.log",
- "ours_writing_log": "srv-f2k.log",
- "reading_subtitle": "Server-reported rates, same prompts, draft head on, prefill chunk 2048 \u00b7 2 warm runs (MLX-Serve: 1)",
- "writing_subtitle": "Server-reported rates, same prompts, greedy, draft block 8 \u00b7 2 warm runs (MLX-Serve: 1)",
- "long_subtitle": "This repo, draft off, one run per length, our first test Mac (524k: previous build)",
+ "machine": "M4 Max Mac Studio, 64 GB",
+ "h2h_sessions": [
+  {"name": "h29", "log": "h2h29.log", "started": "2026-11-22 22:33 CET"},
+  {"name": "h30", "log": "h2h30.log", "started": "2026-11-22 22:42 CET"}
+ ],
+ "h2h_history": [
+  {"name": "first", "started": "2026-11-22 19:09 CET", "mlxserve_log": "mlxserve-draft-on.log", "ours_log": "srv-f2k.log",
+   "ours": "patches through 0016, env.sh, prefill step 2048 (not same-session: MLX-Serve's single run is from 15:08, chunk 2048)"},
+  {"name": "g17b", "started": "2026-11-22 19:52 CET", "mlxserve_log": "mlxserve-rerun-1952-draft-on.log", "ours_log": "srv-g17b.log",
+   "ours": "+ 0017 (server passes the prompt ids to the draft head)"},
+  {"name": "h26", "started": "2026-11-22 20:55 CET", "mlxserve_log": "mlxserve-rerun-2055-draft-on.log", "ours_log": "srv-h26.log",
+   "ours": "+ 0018 (last-chunk fold, lean draft prefill, early candidate list)"},
+  {"name": "h27", "started": "2026-11-22 21:50 CET", "mlxserve_log": "mlxserve-rerun-2150-draft-on.log", "ours_log": "srv-h27.log",
+   "ours": "+ serve.sh (step 8192, no 1 GiB cache limit, async per-visit eval)"},
+  {"name": "h28", "started": "2026-11-22 22:10 CET", "mlxserve_log": "h2h28.log", "ours_log": "h2h28.log",
+   "ours": "+ sliding-window attention in 64-query blocks (BQ_SWA=64)"},
+  {"name": "h29", "started": "2026-11-22 22:33 CET", "mlxserve_log": "h2h29.log", "ours_log": "h2h29.log",
+   "ours": "+ 0019 (l2 clips as one kernel per call): final stack"},
+  {"name": "h30", "started": "2026-11-22 22:42 CET", "mlxserve_log": "h2h30.log", "ours_log": "h2h30.log",
+   "ours": "final stack, repeat"}
+ ],
+ "long_subtitle": "This repo, command line, draft head off, Studio 1, one run per length (524k: previous build)",
  "long_context_runs": [
   "results/gates/s6-4096.json",
   "results/gates/s6-32768.json",
@@ -13,12 +29,5 @@
   "results/gates/h-524k.json",
   "results/gates/h7-1m-kt3-hostvocab.json"
  ],
- "long_context_labels": [
-  "4k",
-  "32k",
-  "131k",
-  "262k",
-  "524k",
-  "1M"
- ]
+ "long_context_labels": ["4k", "32k", "131k", "262k", "524k", "1M"]
 }
