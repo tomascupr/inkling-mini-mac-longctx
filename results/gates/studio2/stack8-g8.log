@@ -1,0 +1,10 @@
+12:54:22 ctx 32768
+{"ctx": 32768, "step": 2048, "max_tokens": 256, "elapsed_s": 49.93622274999507, "prompt_tokens": 32750, "prompt_tps": 706.9159224369027, "decode_tps": 52.44100114226076, "gen_tokens": 126, "peak_mlx_G
+12:55:36 ctx 131072
+{"ctx": 131072, "step": 2048, "max_tokens": 256, "elapsed_s": 232.4298585000215, "prompt_tokens": 131054, "prompt_tps": 575.8910512948045, "decode_tps": 35.85209389792328, "gen_tokens": 126, "peak_mlx
+12:59:36 ctx 262144
+{"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 631.7529692089884, "prompt_tokens": 262126, "prompt_tps": 419.0338712950148, "decode_tps": 27.010553826445765, "gen_tokens": 129, "peak_ml
+ctx 32768 file stack8/ov/mlx_vlm/__init__.py ptps 706.9 dtps 52.44 peak 20.34 needle True tokens_equal True sha_equal True (ref 845.5/33.46/26.19)
+ctx 131072 file stack8/ov/mlx_vlm/__init__.py ptps 575.9 dtps 35.85 peak 23.34 needle True tokens_equal True sha_equal True (ref 605.1/27.13/29.62)
+ctx 262144 file stack8/ov/mlx_vlm/__init__.py ptps 419.0 dtps 27.01 peak 27.35 needle True tokens_equal True sha_equal True (ref 439.0/21.81/34.18)
+G8DONE

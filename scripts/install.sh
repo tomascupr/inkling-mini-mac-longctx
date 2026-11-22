@@ -5,6 +5,7 @@
 #   bash scripts/install.sh            ROOT=~/inkling-mini by default
 #   PREFIX=1 bash scripts/install.sh   also apply 0004-prefix-cache.patch (+ 0006 eviction fix) to the patched copy
 #   EXACT_DSPARK=1 bash scripts/install.sh   also apply 0007-exact-dspark.patch (bit-identical speculative decoding)
+#   (0008 KT3 attention tiles and 0009 host vocab tables are always applied; both are off unless their env is set)
 #   DSPARK=1 bash scripts/install.sh   older 0005 (same tokens, not bitwise) on stacked-v4.patch; not combinable with PREFIX=1
 #
 # Layout afterwards:
@@ -26,6 +27,11 @@ unzip -q fork-$BASE.zip && mv "mlx-vlm-$BASE" base && cp -R base stacked
 # 0005 (DSpark) was built on the previous stack (stacked-v4.patch); with DSPARK=1 that one is used.
 if [ "${DSPARK:-0}" = 1 ]; then STACK=stacked-v4.patch; else STACK=stacked.patch; fi
 (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/$STACK")
+if [ "${DSPARK:-0}" != 1 ]; then
+    # Long-context reading: env MLX_VLM_RELATIVE_ATTN_KTILES=3 and MLX_VLM_EXACT_HOST_VOCAB=1 (bit-identical).
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0008-kt3-attention-tiles.patch")
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0009-host-vocab-prefill.patch")
+fi
 if [ "${PREFIX:-0}" = 1 ] && [ "${DSPARK:-0}" = 1 ]; then
     echo "PREFIX=1 and DSPARK=1 cannot be combined yet" >&2; exit 1
 fi
@@ -48,4 +54,4 @@ for v in base stacked; do
     PYTHONPATH="$ROOT/src/$v" "$ROOT/venv/bin/python" -c \
         "import mlx.core as mx, mlx_vlm; print('$v', mlx_vlm.__version__, mlx_vlm.__file__, 'mlx', mx.__version__)"
 done
-echo "Recommended run env: MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2 PYTHONPATH=$ROOT/src/stacked"
+echo "Recommended run env: MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2 MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1 PYTHONPATH=$ROOT/src/stacked"

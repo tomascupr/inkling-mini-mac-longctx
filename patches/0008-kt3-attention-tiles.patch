@@ -1,0 +1,174 @@
+diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
+--- a/mlx_vlm/models/inkling2/kernels.py
++++ b/mlx_vlm/models/inkling2/kernels.py
+@@ -1670,11 +1670,161 @@
+     }
+ """
+ 
++# KT > 1: KT tiles of BK keys staged per pair of barriers (Ks / Vs hold KT
++# tiles); the compute walks them one BK tile at a time, so every row sees the
++# same BK-key online-softmax updates in the same order (bitwise).
++_KT = int(os.environ.get("MLX_VLM_RELATIVE_ATTN_KTILES", "1"))
++# With KT (any value): prefetch the next KT tiles into registers first.
++_PF = os.environ.get("MLX_VLM_RELATIVE_ATTN_PREFETCH", "0") == "1"
++_SKIPU = os.environ.get("MLX_VLM_RELATIVE_ATTN_SKIP_UNIFORM", "0") == "1"
++_KN = os.environ.get("MLX_VLM_RELATIVE_ATTN_K_ROWMAJOR", "0") == "1"
++_SWP = os.environ.get("MLX_VLM_RELATIVE_ATTN_PIPELINE_QK", "0") == "1"
++if _KT not in (1, 2, 3, 4):
++    raise ValueError("MLX_VLM_RELATIVE_ATTN_KTILES must be 1..4")
++
++
++def _kt_source(src):
++    def sub(a, b):
++        assert src.count(a) == 1, a
++        return src.replace(a, b)
++
++    src = sub("    threadgroup half Ks[D * LDK];\n    threadgroup half Vs[BK * LDV];",
++              "    threadgroup half Ks[KT * D * LDK];\n    threadgroup half Vs[KT * BK * LDV];")
++    src = sub("    for (int k0 = first_key / BK * BK; k0 <= last_diag; k0 += BK) {",
++              "    for (int k00 = first_key / BK * BK; k00 <= last_diag; k00 += KT * BK) {")
++    src = sub("        for (int c = tid; c < BK * D / 8; c += TG) {\n"
++              "            const int r = c / (D / 8);\n"
++              "            const int col = (c % (D / 8)) * 8;\n"
++              "            const int key = k0 + r;",
++              "        for (int c = tid; c < KT * BK * D / 8; c += TG) {\n"
++              "            const int tt = c / (BK * D / 8);\n"
++              "            const int r = (c / (D / 8)) % BK;\n"
++              "            const int col = (c % (D / 8)) * 8;\n"
++              "            const int key = k00 + tt * BK + r;")
++    src = sub("                Ks[(col + j) * LDK + r] = half(float(kv[j / 4][j % 4]));\n"
++              "                Vs[r * LDV + col + j] = half(float(vv[j / 4][j % 4]));",
++              "                Ks[tt * D * LDK + (col + j) * LDK + r] = half(float(kv[j / 4][j % 4]));\n"
++              "                Vs[tt * BK * LDV + r * LDV + col + j] = half(float(vv[j / 4][j % 4]));")
++    src = sub("        if (q0 + qsg * 8 >= L) {\n            continue;\n        }\n",
++              "        if (q0 + qsg * 8 >= L) {\n            continue;\n        }\n"
++              "        for (int tt = 0; tt < KT; ++tt) {\n"
++              "        const int k0 = k00 + tt * BK;\n"
++              "        if (k0 > last_diag) break;\n")
++    src = sub("                simdgroup_load(k_frag, Ks + db * 8 * LDK + kb * 8, LDK);",
++              "                simdgroup_load(k_frag, Ks + tt * D * LDK + db * 8 * LDK + kb * 8, LDK);")
++    src = sub("                simdgroup_load(v_frag, Vs + kb * 8 * LDV + db * 8, LDV);",
++              "                simdgroup_load(v_frag, Vs + tt * BK * LDV + kb * 8 * LDV + db * 8, LDV);")
++    src = sub("""                simdgroup_multiply_accumulate(acc[db], probs[kb], v_frag, acc[db]);
++            }
++        }
++    }
++""", """                simdgroup_multiply_accumulate(acc[db], probs[kb], v_frag, acc[db]);
++            }
++        }
++        }
++    }
++""")
++    if _KN:
++        # K staged row-major (key, dim) with vector stores; the 8x8 K^T
++        # fragment is loaded with transpose: the same matrix, the same MMA.
++        src = sub("    threadgroup half Ks[KT * D * LDK];",
++                  "    constexpr int LDN = D + PAD;\n    threadgroup half Ks[KT * BK * LDN];")
++        src = sub("                Ks[tt * D * LDK + (col + j) * LDK + r] = half(float(kv[j / 4][j % 4]));\n",
++                  "                Ks[tt * BK * LDN + r * LDN + col + j] = half(float(kv[j / 4][j % 4]));\n")
++        src = sub("                simdgroup_load(k_frag, Ks + tt * D * LDK + db * 8 * LDK + kb * 8, LDK);",
++                  "                simdgroup_load(k_frag, Ks + tt * BK * LDN + kb * 8 * LDN + db * 8, LDN, ulong2(0, 0), true);")
++    if _SWP:
++        # Software pipelining inside the KT group: tile tt + 1's QK product is
++        # issued before tile tt's softmax and PV (it depends only on q and the
++        # staged K), so MMA and softmax work overlap; each row's operations on
++        # its state keep their order (bitwise).
++        qk_start = src.index("        simdgroup_float8x8 scores[BK / 8];\n")
++        qk_end = src.index("        // Almost every global-attention tile", qk_start)
++        qk = src[qk_start:qk_end]
++        body = qk.replace("        simdgroup_float8x8 scores[BK / 8];\n", "")
++        nxt = body.replace("scores[kb]", "sc_next[kb]")
++        nxt1 = nxt.replace("tt * D * LDK", "(tt + 1) * D * LDK").replace(
++            "tt * BK * LDN", "(tt + 1) * BK * LDN")
++        nxt0 = nxt.replace("tt * D * LDK", "0").replace("tt * BK * LDN", "0")
++        src = src[:qk_start] + (
++            "        simdgroup_float8x8 scores[BK / 8];\n"
++            "        for (int kb = 0; kb < BK / 8; ++kb) scores[kb] = sc_next[kb];\n"
++            "        if (tt + 1 < KT && k0 + BK <= last_diag) {\n" + nxt1 + "        }\n"
++        ) + src[qk_end:]
++        src = sub("        for (int tt = 0; tt < KT; ++tt) {\n",
++                  "        simdgroup_float8x8 sc_next[BK / 8];\n" + nxt0 +
++                  "        for (int tt = 0; tt < KT; ++tt) {\n")
++    if _SKIPU:
++        # factor == 1 for every row of the simdgroup (no row's maximum moved):
++        # multiplying acc by exactly 1.0 changes nothing, so skip it (uniform
++        # branch: no divergence).
++        src = sub("""        for (int db = 0; db < D / 8; ++db) {
++            acc[db].thread_elements()[0] *= factor;
++            acc[db].thread_elements()[1] *= factor;
++            for (int kb = 0; kb < BK / 8; ++kb) {""", """        const bool rescale = !simd_all(factor == 1.0f);
++        for (int db = 0; db < D / 8; ++db) {
++            if (rescale) {
++                acc[db].thread_elements()[0] *= factor;
++                acc[db].thread_elements()[1] *= factor;
++            }
++            for (int kb = 0; kb < BK / 8; ++kb) {""")
++    if _PF:
++        # Register prefetch: each thread's K/V vectors of the next KT tiles are
++        # loaded before the current tiles are computed (same values, stored to
++        # threadgroup memory at the start of the next iteration).
++        src = sub("    for (int k00 = first_key / BK * BK; k00 <= last_diag; k00 += KT * BK) {\n"
++                  "        threadgroup_barrier(mem_flags::mem_threadgroup);\n",
++                  "    constexpr int PFN = (KT * BK * D / 8 + TG - 1) / TG;\n"
++                  "    vec<T, 4> pk[PFN][2], pv[PFN][2];\n"
++                  "    auto pf_load = [&](int kbase) {\n"
++                  "        for (int u = 0; u < PFN; ++u) {\n"
++                  "            const int c = int(tid) + u * TG;\n"
++                  "            pk[u][0] = pk[u][1] = vec<T, 4>(0);\n"
++                  "            pv[u][0] = pv[u][1] = vec<T, 4>(0);\n"
++                  "            if (c < KT * BK * D / 8) {\n"
++                  "                const int tt = c / (BK * D / 8);\n"
++                  "                const int r = (c / (D / 8)) % BK;\n"
++                  "                const int col = (c % (D / 8)) * 8;\n"
++                  "                const int key = kbase + tt * BK + r;\n"
++                  "                if (key < S) {\n"
++                  "                    auto kp = (const device vec<T, 4>*)(k_head + key * k_strides[2] + col);\n"
++                  "                    auto vp = (const device vec<T, 4>*)(v_head + key * v_strides[2] + col);\n"
++                  "                    pk[u][0] = kp[0]; pk[u][1] = kp[1];\n"
++                  "                    pv[u][0] = vp[0]; pv[u][1] = vp[1];\n"
++                  "                }\n"
++                  "            }\n"
++                  "        }\n"
++                  "    };\n"
++                  "    pf_load(first_key / BK * BK);\n"
++                  "    for (int k00 = first_key / BK * BK; k00 <= last_diag; k00 += KT * BK) {\n"
++                  "        threadgroup_barrier(mem_flags::mem_threadgroup);\n")
++        old_load = src[src.index("        for (int c = tid; c < KT * BK * D / 8; c += TG) {"):
++                       src.index("        threadgroup_barrier(mem_flags::mem_threadgroup);\n        if (q0 + qsg * 8 >= L) {")]
++        src = src.replace(old_load,
++                  "        for (int u = 0; u < PFN; ++u) {\n"
++                  "            const int c = int(tid) + u * TG;\n"
++                  "            if (c < KT * BK * D / 8) {\n"
++                  "                const int tt = c / (BK * D / 8);\n"
++                  "                const int r = (c / (D / 8)) % BK;\n"
++                  "                const int col = (c % (D / 8)) * 8;\n"
++                  "                for (int j = 0; j < 8; ++j) {\n"
++                  "                    Ks[tt * D * LDK + (col + j) * LDK + r] = half(float(pk[u][j / 4][j % 4]));\n"
++                  "                    Vs[tt * BK * LDV + r * LDV + col + j] = half(float(pv[u][j / 4][j % 4]));\n"
++                  "                }\n"
++                  "            }\n"
++                  "        }\n")
++        src = sub("        threadgroup_barrier(mem_flags::mem_threadgroup);\n        if (q0 + qsg * 8 >= L) {",
++                  "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
++                  "        if (k00 + KT * BK <= last_diag) pf_load(k00 + KT * BK);\n"
++                  "        if (q0 + qsg * 8 >= L) {")
++    return src
++
++
+ _relative_attention_kernel = mx.fast.metal_kernel(
+     name="inkling2_relative_attention_gqa",
+     input_names=["q", "k", "v", "rel", "sinks", "key_start", "sizes", "scale"],
+     output_names=["out"],
+-    source=_RELATIVE_ATTENTION_SOURCE,
++    source=_RELATIVE_ATTENTION_SOURCE if (_KT == 1 and not _PF and not _SKIPU and not _KN and not _SWP) else _kt_source(_RELATIVE_ATTENTION_SOURCE),
+     ensure_row_contiguous=False,
+     compile_options={"math_mode": _MATH_MODE},
+ )
+@@ -1724,6 +1874,7 @@
+             ("GQ", grouped_heads),
+             ("FAST_MASK", _FAST_MASK if not window else 0),
+             ("TG", tg),
++            *([("KT", _KT)] if (_KT > 1 or _PF or _SKIPU or _KN or _SWP) else []),
+         ],
+         grid=((L + bq - 1) // bq * tg, Hq // grouped_heads, B),
+         threadgroup=(tg, 1, 1),

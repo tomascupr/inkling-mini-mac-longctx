@@ -1,0 +1,7 @@
+14:49:45 ctx 131072
+{"ctx": 131072, "step": 2048, "max_tokens": 256, "elapsed_s": 232.74600683304016, "prompt_tokens": 131054, "prompt_tps": 574.1706944615223, "decode_tps": 34.102346506912454, "gen_tokens": 126, "peak_m
+14:53:44 ctx 262144
+{"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 629.7882610830711, "prompt_tokens": 262126, "prompt_tps": 420.4196367329493, "decode_tps": 25.612172279245712, "gen_tokens": 129, "peak_ml
+ctx 131072 file stack11/ov/mlx_vlm/__init__.py ptps 574.2 dtps 34.10 peak 21.81 needle True tokens_equal True sha_equal True (ref 605.1/27.13/29.62)
+ctx 262144 file stack11/ov/mlx_vlm/__init__.py ptps 420.4 dtps 25.61 peak 25.81 needle True tokens_equal True sha_equal True (ref 439.0/21.81/34.18)
+G11DONE

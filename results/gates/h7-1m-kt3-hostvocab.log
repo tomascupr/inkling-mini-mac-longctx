@@ -1,0 +1,3 @@
+2026-11-22 14:30:43 CET RUN 1M stack6+KT3+hostvocab step2048 text-only
+{"ctx": 1048576, "step": 2048, "max_tokens": 256, "elapsed_s": 5981.346282375045, "prompt_tokens": 1048558, "prompt_tps": 175.57731684223623, "decode_tps": 11.376271997146917, "gen_tokens": 95, "peak_mlx_GiB": 50.08329678699374, "needle_found": true, "logprobs_sha256": "eb5c805b67f5200d79658fef32353
+2026-11-22 16:10:29 CET DONE

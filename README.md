@@ -17,11 +17,11 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 | 131k tokens | 401.9 → **625.2** | 16.2 → **40.2** | 1.56× / 2.48× |
 | 262k tokens | 256.4 → **453.9** | 10.7 → **29.8** | 1.77× / 2.78× |
 | 524k tokens | not measured* → **292.6** | not measured* → **17.9** | – |
-| 1M tokens | not measured* → **163.3** | not measured* → **11.4** | – |
+| 1M tokens | not measured* → **175.6** | not measured* → **11.4** | – |
 
-The 1M row is today's build at prefill step 2048 (was 156.0 / 10.0 with the previous build at step 512). The 524k row is still the previous build (writing ~10–12% slower than today's at 4k–262k); it will be re-run.
+The 1M row is today's build at prefill step 2048 with `MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1` (patches 0008/0009; same tokens and log-probabilities as the 163.3 tok/s run without them; was 156.0 / 10.0 with the previous build at step 512). The 524k row is still the previous build (writing ~10–12% slower than today's at 4k–262k); it will be re-run.
 
-\* We have no 524k or 1M run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes (peak 35.3 GiB of GPU memory) and the full 1M-token document (1,048,558 tokens) in 1 h 47 min (peak 50.8 of the 51.8 GiB GPU limit), and found the hidden fact both times.
+\* We have no 524k or 1M run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes (peak 35.3 GiB of GPU memory) and the full 1M-token document (1,048,558 tokens) in 1 h 40 min (peak 50.1 of the 51.8 GiB GPU limit), and found the hidden fact both times.
 
 The longer the prompt, the bigger the gain. At 32k–1M the model found a fact hidden in the middle of the document in every run, before and after.
 Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
@@ -59,6 +59,11 @@ document's memory. Env and details: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
   in 64 GB with room to spare.
 - **Tuned GPU kernels.** The attention kernel (how each word looks back at the document) and the expert kernels (the
   model's mixture-of-experts layers) are tuned for the M4 Max, with bit-identical results.
+- **Vocabulary tables off the GPU while reading huge prompts.** At 1M tokens the weights plus the reserved KV cache sit
+  right at MLX's buffer-cache limit (0.95 × the recommended working set), and past it MLX's allocator frees its buffer
+  cache on every miss, so every op gets fresh Metal buffers (+20–30% per layer). Keeping the two 0.86 GiB vocabulary
+  tables (input embeddings and output head) in host memory during the chunked prefill, gathering each chunk's
+  embedding rows on the CPU, and moving both back before the last token keeps the GPU under that line. Same outputs.
 - **Instant follow-ups.** The processed state of a document is kept, so follow-up questions start in 1.5 s instead of 3.6 min.
 
 ## Quickstart

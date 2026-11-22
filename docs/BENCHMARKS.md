@@ -20,7 +20,8 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 131k (131,054) | **625.2** | **40.16** | **23.36** | 401.9 / 16.2 / 33.58 | 1.56× / 2.48× | bit-identical to unpatched code |
 | 262k (262,126) | **453.9** | **29.76** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.78× | bit-identical to unpatched code |
 | 524k (524,270), previous build | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
-| 1M (1,048,558), step 2048, text-only | **163.3** | **11.36** | **50.76** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
+| 1M (1,048,558), step 2048, KT=3 + host vocab, text-only | **175.6** | **11.38** | **50.08** | not measured on the standard build | – | needle found; tokens + logprob sha equal to the 163.3 run (no 1M unpatched reference run) |
+| 1M, step 2048, text-only, without 0008/0009 env | 163.3 | 11.36 | 50.76 | | | needle found |
 | 1M, step 512, text-only, previous build | 156.0 | 10.04 | 50.04 | | | needle found |
 
 **Bit-identical speculative decoding (`0007`, 2026-11-22 11:53–12:08 CET).** `stacked.patch` + `0007-exact-dspark.patch`,
@@ -94,7 +95,12 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
   (server log: cold `time_to_first_token=218.274s`, follow-up `cached_tokens=131006`, `time_to_first_token=1.459s`;
   the table uses the client-side times), `results/LEADERBOARD.tsv` (every experiment).
 
-1M, current build: measured 2026-11-22 12:20–14:07 CET (`results/gates/h6-1m-step2048.json`, `results/gates/headline-h6-20261122.log`):
+1M, current build + 0008/0009: measured 2026-11-22 14:30–16:10 CET on Studio 1 (`results/gates/h7-1m-kt3-hostvocab.json`, `.log`):
+1,048,558 prompt tokens read at 175.6 tok/s (+7.5% vs 163.3), 95 tokens written at 11.38 tok/s, needle found, peak 50.08 GiB.
+Env: recommended env + `MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1`. Tokens and logprob sha256 identical to
+the 163.3 run below (same step), so both patches are bit-identical at 1M too.
+
+1M, current build without 0008/0009: measured 2026-11-22 12:20–14:07 CET (`results/gates/h6-1m-step2048.json`, `results/gates/headline-h6-20261122.log`):
 1,048,558 prompt tokens read in 6,420 s (163.3 tok/s, +4.7% vs 156.0), 95 tokens written at 11.36 tok/s (+13% vs 10.04), needle found,
 peak 50.76 GiB against the 51.84 GiB cap. Settings: current `stacked.patch`, recommended env, **step 2048** (fits since the
 conv-state fix; synthetic-depth probe predicted 50.58 GiB), vision tower dropped, default max context, no sysctl. It wrote the
@@ -165,6 +171,7 @@ N tokens. (An earlier count charged every token the last chunk's depth, which ov
 | 131k | 15.78 | 900 | 624.3 | 69.4% |
 | 262k | 22.22 | 639 | 453.6 | 71.0% |
 | 524k | 35.11 | 404 | 292.6 | 72.4% |
+| 1M (step 2048, KT=3 + host vocab) | 60.88 | 233 | 175.6 | 75.4% |
 | 1M (step 2048) | 60.88 | 233 | 163.3 | 70.0% |
 | 1M (step 512, previous build) | 60.88 | 233 | 156.0 | 67.0% |
 
@@ -184,6 +191,7 @@ Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 | 131k | 9.96 | 18.24 | 54.8 | 40.16 | 73% |
 | 262k | 14.26 | 26.11 | 38.3 | 29.76 | 78% |
 | 524k (previous build) | 22.85 | 41.85 | 23.9 | 17.86 | 75% |
+| 1M (KT=3 + host vocab) | 40.03 | 73.3 | 13.6 | 11.38 | 84% |
 | 1M | 40.03 | 73.3 | 13.6 | 11.36 | 83% |
 | 1M (previous build) | 40.03 | 73.3 | 13.6 | 10.04 | 74% |
 

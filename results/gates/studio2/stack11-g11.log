@@ -1,0 +1,7 @@
+14:47:42 ctx 4096
+{"ctx": 4096, "step": 2048, "max_tokens": 256, "elapsed_s": 8.070922791957855, "prompt_tokens": 4078, "prompt_tps": 833.361233455473, "decode_tps": 47.12750135914736, "gen_tokens": 123, "peak_mlx_GiB"
+14:47:57 ctx 32768
+{"ctx": 32768, "step": 2048, "max_tokens": 256, "elapsed_s": 44.95192250004038, "prompt_tokens": 32750, "prompt_tps": 793.3238435443955, "decode_tps": 44.92462756104066, "gen_tokens": 126, "peak_mlx_G
+ctx 4096 file stack11/ov/mlx_vlm/__init__.py ptps 833.4 dtps 47.13 peak 18.19 needle True tokens_equal True sha_equal True (ref 941.5/35.27/25.10)
+ctx 32768 file stack11/ov/mlx_vlm/__init__.py ptps 793.3 dtps 44.92 peak 18.81 needle True tokens_equal True sha_equal True (ref 845.5/33.46/26.19)
+G11DONE

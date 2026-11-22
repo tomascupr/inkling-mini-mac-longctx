@@ -6,6 +6,24 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **16:10 — 1M with KT=3 + host vocab (Studio 1): reading 163.3 → 175.6 tok/s (+7.5%), writing 11.38, peak 50.08 GiB,
+  needle found; tokens and logprob sha equal to the 163.3 run** (`results/gates/h7-1m-kt3-hostvocab.json`). The probe
+  projected 170–178. Patches 0008/0009 committed; `install.sh` applies both (off unless their env is set).
+- **15:30–16:10 — short context vs MLX-Serve on Studio 2 (relaxed gate, same official weights).** MLX-Serve (0.32.5
+  libmlx, prefill chunk 2048) self-reports 1010/1012 tok/s reading at 4k and 877 at 32k there; we measured 870 / 773
+  (step 2048, warm). Profile at depth 0 (barriered, 4k prompt): MoE 52% (gather_qmm NVFP4 at ~10.5 TFLOP/s, i.e. compute
+  bound; fusing gate+up into one gather_qmm saved nothing), attention projections 18% (bf16 GEMMs, also compute bound),
+  attention core 7%, message gates 6%, attention residuals 6%, short convs / l2 clips / norms ~8%. Env-only sweeps (eval
+  cadence, step 2048–8192) gave ≤2%. New prefill-only paths (`MLX_VLM_INKLING2_PREFILL_FUSED=1`, patch 0010), measured:
+  MoE route-combine fused into the un-sort (one kernel; bit-identical with safe math, −1.7 ms per visit), the fork's
+  virtual-concat short-conv kernel for any length (bit-identical), compiled l2 clips (bit-identical): 4k 870 → 904
+  (+3.9%), logprob sha equal to the fork. Adding a fused message gate: 933 (top-1 99.6% alone). Adding a fused
+  attention-residual kernel (no stack): 986 at step 2048, 1008 at step 4096 (4k), 865 / 883 at 32k; greedy tokens on
+  the 4k/32k needle prompts identical to the fork, but teacher-forced top-1 on an 8-prompt set is 98.5% (fork vs itself
+  at step 1024: 98.85%; step 4096: 99.6%) — below the 99% gate, so the residual kernel stays off by default while a
+  bit-exact version (replicating MLX's rms_norm / gemv / softmax / gemv_t order) is being tested. Failed: merged q/k/v/r/gate
+  projections (bit-exact at 2048 rows only; top-1 98.5% across row counts) — dropped.
+
 - **14:11–14:30 — per-visit profile at 1M depth: the "depth-growing" non-attention cost is MLX allocator thrash, not
   depth** (`results/profile-20261122/`). At 1M depth the 40 non-global visits of a 2048-token chunk took 54.9 ms each
   vs 42.7 ms at depth 0. The same slowdown appears at depth 0 when 32 GiB of unrelated MLX arrays are held (51.6 ms)
