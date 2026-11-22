@@ -361,3 +361,11 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   harness's warm-up run for that context, and the first 4k request shows the same dip (69–70 vs 80). This points to
   first-use cost at the new context length (kernel JIT for new shapes or KV/buffer growth), not steady-state decode.
   Not investigated further tonight.
+- **S2 same session h31 (23:10–23:29 CET), 131k rematch, MLX-Serve then ours** (`scripts/serve.sh` + patch 0019 +
+  `BQ_SWA=64`, commit 32effed at start; official checkpoint, draft on, same needle prompts, server-log tok/s, 3 runs
+  after a 4k 16-token MLX-Serve warmup). Reading 131,054-token prompt: MLX-Serve 674.0 / 674.0 / 673.9 (median 674.0)
+  vs ours 703.5 / 706.2 / 706.2 (median 706.2, **+4.8%**). Writing: MLX-Serve 45.0 / 51.7 / 51.6 (median 51.6) vs ours
+  52.3 / 56.6 / 56.7 (median 56.6, **+9.7%**). The first request at this new context is soft on writing for both
+  (MLX-Serve 45.0 then 51.6–51.7; ours 52.3 then 56.6–56.7), the same first-use dip seen at 4k/32k; prefill is steady.
+  Needle found in all 6 answers (`VIOLET-ANCHOR-4729`). 131k fit on the 64 GB Mac (MLX-Serve `--ctx-size 163840`,
+  admission 4.5 / 27.9 GB free). Logs: `results/h2h-20261122/h2h31-131k.log`.
