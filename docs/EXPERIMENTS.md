@@ -296,3 +296,10 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
 - 32k step sweep without the limit (S1, async): 3072 960.3 / 83.0 writing, 6144 967.9 / 81.6, 8192 972.6 / 83.3.
 - 4k single chunk variants (S2, step 4096, no limit): eval every 2 1000.2, no per-visit eval 1003.7, `PF_MGF=1` + 4 MB
   buffers 1003.3. Plateau ~1,000-1,005 vs MLX-Serve 1,030-1,037.
+- **Step 8192, no cache limit, async eval (S2 `srv-gi1`, then `srv-gk` with 2 warm runs):** reading 1004.7 / 1005.1 at
+  4k (one forward) and 899.3 / 900.4 / 899.2 at 32k (four chunks); writing 79.6 / 79.6 and 76.1 / 76.0. Against MLX-Serve's
+  20:55 run on the same Mac (1029.7–1036.8 / 892.7–894.4 reading, 73.9–75.0 / 71.3–72.7 writing): **32k reading +0.6%,
+  both writing rows ahead; 4k reading still 2.6% behind.** S1: 32k 972.6 (8192) / 976.4 (16384, writing 80.4).
+  Launcher: `scripts/serve.sh`. Needle found in all 18 answers.
+- 4k single-forward knobs (S1, step 8192, no limit): 8 MB command buffers 1088.1, 200 ops per buffer 1088.5, merged
+  forget/gain matmul (`PF_MGX=0`) 1090.5 vs 1085.7. Within noise. FAIL.
