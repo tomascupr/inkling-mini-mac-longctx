@@ -343,3 +343,9 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
 - Attention projections as one GEMM over concatenated weights (bf16, S1 microbench, all combinations bitwise): 4077
   rows kv 3.35 -> 3.03 ms, qg 7.96 -> 7.95, q+g+k+v 10.51 -> 10.50, q+g+k+v+r+sink 11.07 -> 11.06; 8192 rows the same
   within 0.4%. The GEMMs are compute-bound, so merging only saves one launch. FAIL; not wired in.
+- **S2 same session h29 (22:33–22:40 CET), MLX-Serve then ours (serve.sh + BQ_SWA64 + patch 0019):** reading 4k
+  MLX-Serve 1039.3 / 1027.6 / 1036.6 (mean 1034.5) vs ours 1041.5 / 1039.7 (+0.6%); 32k 898.3 / 898.1 / 897.8 vs
+  928.8 / 927.4 / 928.2 (+3.4%). Writing 4k 76.1–76.6 vs 80.1 / 80.5; 32k 72.3–74.2 vs 75.1 / 75.7. Needle 18/18.
+  First ahead on all four server rows, but the 4k lead is small.
+- MoE softcapped SwiGLU as one Metal kernel (S1 microbench, 32616 x 1152): compiled MLX 1.40 ms; variants with
+  precise or fast exp/tanh 0.67–1.18 ms but none bitwise (17k–21k of 37.6M elements differ). Testing more variants.

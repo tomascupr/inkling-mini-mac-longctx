@@ -1,0 +1,19 @@
+mlxserve start 22:33:25
+RERUN_DONE
+mlxserve log /Users/tomascupr/.exo-inkling-bench/mlxserve/logs/serve-rerun-2233-draft-on.log
+  <- 4078+16 tokens streamed [prefill: 1023.5 tok/s, decode: 101.4 tok/s] [length]
+  <- 4078+122 tokens streamed [prefill: 1039.3 tok/s, decode: 76.5 tok/s] [stop]
+  <- 4078+122 tokens streamed [prefill: 1027.6 tok/s, decode: 76.6 tok/s] [stop]
+  <- 4078+122 tokens streamed [prefill: 1036.6 tok/s, decode: 76.1 tok/s] [stop]
+  <- 32750+125 tokens streamed [prefill: 898.3 tok/s, decode: 74.1 tok/s] [stop]
+  <- 32750+125 tokens streamed [prefill: 898.1 tok/s, decode: 72.3 tok/s] [stop]
+  <- 32750+125 tokens streamed [prefill: 897.8 tok/s, decode: 74.2 tok/s] [stop]
+== ours h29 22:38:03
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=8.668s prefill=893.2 tok/s decode=70.2 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=5.471s prefill=1041.5 tok/s decode=80.1 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=5.467s prefill=1039.7 tok/s decode=80.5 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=37.167s prefill=928.8 tok/s decode=69.0 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=37.074s prefill=927.4 tok/s decode=75.1 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=37.023s prefill=928.2 tok/s decode=75.7 tok/s finish_reason=stop in_flight=0
+  18 VIOLET-ANCHOR-4729
+H2H29DONE
