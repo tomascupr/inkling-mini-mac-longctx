@@ -12,10 +12,12 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 
 | Prompt length | Reading: before → after | Writing: before → after | Speed-up (reading / writing) |
 |---|---|---|---|
-| 4k tokens | 758.4 → **948.0** | 33.1 → **41.0** | 1.25× / 1.24× |
-| 32k tokens | 667.9 → **863.6** | 27.0 → **39.8** | 1.29× / 1.47× |
-| 131k tokens | 401.9 → **623.6** | 16.2 → **31.2** | 1.55× / 1.93× |
-| 262k tokens | 256.4 → **448.7** | 10.7 → **23.9** | 1.75× / 2.23× |
+| 4k tokens | 758.4 → **951.3** | 33.1 → **47.6** | 1.25× / 1.44× |
+| 32k tokens | 667.9 → **865.5** | 27.0 → **44.6** | 1.30× / 1.65× |
+| 131k tokens | 401.9 → **624.5** | 16.2 → **34.3** | 1.55× / 2.12× |
+| 262k tokens* | 256.4 → **448.7** | 10.7 → **23.9** | 1.75× / 2.23× |
+
+\* 262k was measured with the previous version of our patches (writing has since sped up 10–14% at 4k–131k; 262k not re-run yet).
 
 The longer the prompt, the bigger the gain. At 32k–262k the model found a fact hidden in the middle of the document in every run, before and after.
 Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
@@ -52,15 +54,15 @@ mlx 0.32.4. For fast follow-ups, start the server with the prefix cache on (`APC
 
 ## Quality
 
-Bit-identical outputs: at 32k and 131k the patched build produces the same tokens and the same per-token
+Bit-identical outputs: at 4k, 32k and 131k the patched build produces the same tokens and the same per-token
 log-probabilities, bit for bit, as the same code without our patches (the community fork we build on). No quantized KV cache, no sparse or approximate
 attention: this is the full bf16 model, just faster.
 
 ## What's next
 
 - **1M tokens on one Mac:** the model supports 1M tokens; our memory budget projects a 1M context to fit at full bf16 quality (~50.6 of the 51.8 GiB GPU limit). A full 1M run is next; not measured yet.
-- **Speculative decoding** with Inkling's own draft head, to push decode further.
-- More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~49–62% of its memory bandwidth on decode.
+- **Speculative decoding** with Inkling's own draft head, to push decode further. (The table above is without it on both sides; the standard build with its draft head already writes ~58.8 tok/s at 4k, see [docs/BENCHMARKS.md](docs/BENCHMARKS.md).)
+- More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~55–63% of its memory bandwidth on decode.
 
 ## Credits
 

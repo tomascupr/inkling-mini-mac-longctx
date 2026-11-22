@@ -1,6 +1,6 @@
 diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
---- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 00:55:31
-+++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 01:39:41
+--- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 02:59:18
++++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 02:59:18
 @@ -1,6 +1,7 @@
  """Inference kernels that retain Inkling 2's FP32 intermediate arithmetic."""
  
@@ -9,7 +9,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
  from functools import lru_cache
  
  import mlx.core as mx
-@@ -299,34 +300,69 @@
+@@ -644,34 +645,69 @@
  # (mlx_lm/models/inkling2/kernels.py, Copyright 2026 Apple Inc., MIT License).
  # Causal flash attention with a relative position bias and a sink logit per
  # query.
@@ -90,7 +90,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      const bool row_ok = row < L;
      const int diag = S - L + row;
  
-@@ -383,7 +419,7 @@
+@@ -728,7 +764,7 @@
              }
          }
          threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -99,7 +99,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              continue;
          }
  
-@@ -397,22 +433,43 @@
+@@ -742,22 +778,43 @@
              }
          }
  
@@ -156,7 +156,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              }
          }
          // The 4 lanes of a row are lane ^ 1 and lane ^ 8 apart.
-@@ -454,11 +511,12 @@
+@@ -799,11 +856,12 @@
  """
  
  _relative_attention_kernel = mx.fast.metal_kernel(
@@ -170,7 +170,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
  )
  
  
-@@ -479,6 +537,9 @@
+@@ -824,6 +882,9 @@
      (B, L, Hq, D)."""
      B, Hq, L, D = q.shape
      Hkv, S = k.shape[1], k.shape[2]
@@ -180,7 +180,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      return _relative_attention_kernel(
          inputs=[
              q,
-@@ -497,11 +558,15 @@
+@@ -842,11 +903,15 @@
              ("HKV", Hkv),
              ("R", rel.shape[-1]),
              ("WINDOW", window),
@@ -201,9 +201,9 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
          output_dtypes=[q.dtype],
      )[0]
 diff -ruN a/mlx_vlm/models/switch_layers.py b/mlx_vlm/models/switch_layers.py
---- a/mlx_vlm/models/switch_layers.py	2026-11-22 00:55:31
-+++ b/mlx_vlm/models/switch_layers.py	2026-11-22 01:41:09
-@@ -87,7 +87,12 @@
+--- a/mlx_vlm/models/switch_layers.py	2026-11-22 02:59:18
++++ b/mlx_vlm/models/switch_layers.py	2026-11-22 02:59:18
+@@ -103,7 +103,12 @@
      *_, M = indices.shape
      indices = indices.flatten()
      order = mx.argsort(indices)
