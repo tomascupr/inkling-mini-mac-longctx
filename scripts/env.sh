@@ -21,4 +21,6 @@ if [ "${NO_DRAFT:-0}" != 1 ]; then
     # Draft proposals from the first 16,384 ids of data/draft_vocab_order.json + the prompt's ids (0016).
     export MLX_VLM_INKLING2_DRAFT_COMPILE=1 MLX_VLM_INKLING2_DRAFT_VOCAB=16384
     export MLX_VLM_INKLING2_DRAFT_MIN_CTX=1024 MLX_VLM_INKLING2_DRAFT_MAX_CTX=262144
+    # Server (0018): no cache clears inside an answer, last chunk + last token in one forward, lean draft prefill.
+    export MLX_VLM_BATCH_CACHE_EVAL_INTERVAL=0 MLX_VLM_SERVER_FOLD_LAST=1 MLX_VLM_INKLING2_DRAFT_LEAN_PREFILL=1
 fi

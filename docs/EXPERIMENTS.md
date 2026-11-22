@@ -245,3 +245,30 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   rows): S1 1064.1 / 941.5 vs 1061.6 / 939.3, tokens and acceptance unchanged. Small WIN.
 - Fused gate+up expert GEMM (one `gather_qmm`, N = 2,304; the checkpoint's w13 shares one global scale): S1 1062.3 /
   940.2 vs 1063.2 / 941.7, same answers. No gain (the expert GEMM is compute-bound; N doesn't help). FAIL, off.
+- Server step 3072 / 2560 for every prompt (S1, cache limit kept): 4k 1041 / 1054.5 (worse than 2048), 32k 941.5 / 947.9.
+  A long-prompt-only override (`MLX_VLM_SERVER_STEP_LONG=2560` above 8k tokens) then read 942.0 vs 941.9 at 32k on S1
+  and 864.4 vs 864.4 on S2: no gain. Opt-in, off.
+- Default cache limit kept, no per-chunk `clear_cache` in server prefill, `EVAL_EVERY=1` (S1): 1066.1 / 943.2 vs
+  1064 / 941.5. Within noise. Off.
+- Last-chunk fold (`MLX_VLM_SERVER_FOLD_LAST=1`): the server ran the last prompt token as its own forward after the
+  last chunk; now the last chunk and the last token run in one forward (as `generate` does). S2: 4k 983.4 -> 987.2;
+  S1: 1064 -> 1068. Small WIN (+0.4% at 4k, 32k unchanged), default on in 0018.
+- Draft `CONF_MIN=0` (allow a verify of the bonus token alone when the drafter is unsure, S1): 4k writing 87.7 vs 87.4,
+  32k 80.9 vs 81.8, more rounds. With tau 0.8: 87.1 / 76.8. tau 0.8 alone: 86.3 / 78.6. FAIL; tau 0.65 + at least one
+  draft stays.
+- Approximate fusions back on (S2): merged forget/gain matmul (`PF_MGX=0`) 988.5 / 870.7, plus the older attention-
+  residual kernel (`PF_ARX=0`) 993.9 / 872.4 vs 987.2 / 867.7. +0.7% / +0.5%, but `PF_ARX=0` already failed the 99%
+  top-1 gate (98.5%) earlier today. Not used.
+- Fused message-gate tail (`PF_MGF=1`): forget/gain f32 K=64 products with the same 8x8 simdgroup MMA k-order as MLX's
+  GEMM plus tanh/combine in one kernel. Bitwise equal to the reference at 2, 7, 30, 2,030, 2,048 and 4,078 rows;
+  0.46 -> 0.37 ms per gate at 2,048 rows in isolation. Server (S1): 1068.1 / 941.9 vs 1067.7 / 942.1; S2: 984.7 vs
+  985.0. No end-to-end gain (the gate is overlapped). Opt-in, off.
+- What MLX-Serve does differently (read from github.com/ddalcu/mlx-serve, `src/plugins/inkling2`): its prefill runs each
+  visit as "a few kernels around the matmuls" (`pre.metal`, `mid.metal`, its own rel-attention), and it loads the
+  NVFP4 experts without the per-expert global scale inside the GEMM (`scale / (6 x 448)` applied to the output). Its
+  binary ships libmlx 0.32.5 (unreleased main), which has MLX PR #4709 (fp4 -> half dequant fast path, only when no
+  global scale is passed).
+- Same expert layout here (`PF_POSTSCALE=1`: plain NVFP4 gathers, scale applied in the SwiGLU and folded into the routing
+  weights): on mlx 0.32.4 S1 1062.6 / 938.2 vs 1068.1 / 942.2 (the extra scale pass costs); on mlx 0.32.4 + PR #4709
+  built from source (S2): 973.2 / 863.3 vs 976.5 / 865.7 with the old layout and 981.0 / 865.9 on stock 0.32.4. The
+  half-loader fast path doesn't reach the sorted gather at our shapes. FAIL; answers still found the needle.

@@ -68,6 +68,10 @@ if [ "$DRAFT" = 1 ]; then
     cp "$HERE/../data/draft_vocab_order.json" stacked/mlx_vlm/speculative/drafters/inkling2_dspark/
     # Server single-request draft path: pass the prompt ids to the draft head like generate_step does.
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0017-server-draft-prompt-ids.patch")
+    # Server prefill: last chunk + last prompt token in one forward; draft prefill projects only the global draft
+    # layer per chunk (sliding layers once from the tail); candidate list built during prefill; message-gate casts
+    # inside the compiled tail (bitwise). Opt-in experiments: PF_MGF (fused gate tail, bitwise), PF_GU, PF_POSTSCALE.
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0018-server-fold-last-lean-draft-prefill.patch")
 fi
 [ -x "$ROOT/venv/bin/python" ] || "$PYBIN" -m venv "$ROOT/venv"
 "$ROOT/venv/bin/pip" install --quiet --upgrade pip

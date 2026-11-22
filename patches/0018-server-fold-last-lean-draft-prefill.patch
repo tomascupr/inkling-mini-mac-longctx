@@ -1,0 +1,322 @@
+diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py	2026-11-22 20:48:23.789599514 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 20:48:23.789599514 +0100
+@@ -2383,6 +2383,13 @@
+                 prefill_kwargs=policy_kwargs,
+             ):
+                 self.prefill_step_size = None
++        _long = int(os.environ.get("MLX_VLM_SERVER_STEP_LONG", "0") or 0)
++        if _long and self.prefill_step_size is not None:
++            # Long prompts: fewer, larger chunks (2560 measured best at 32k; 2048 stays best at 4k).
++            _ie = getattr(self, "_inputs_embeds", None)
++            _n = int(_ie.shape[1]) if _ie is not None else 0
++            if _n > int(os.environ.get("MLX_VLM_SERVER_STEP_LONG_MIN", "8192")):
++                self.prefill_step_size = _long
+ 
+         if self._apc_coordinator is not None:
+             self._apc_coordinator.prepare_prefill(
+@@ -2478,6 +2485,15 @@
+             return True
+         # See the note in stream_generate: prompts at or below prefill_step_size
+         # would otherwise skip chunking and materialize the full logits tensor.
++        if (
++            os.environ.get("MLX_VLM_SERVER_FOLD_LAST", "0") == "1"
++            and self._right_pad_per_row is None
++            and self._inputs_embeds.shape[1] <= self.prefill_step_size
++            and self._processed_prompt_columns > 0
++        ):
++            # The last chunk and the last prompt token in one forward
++            # (generate() keeps only the last row's logits).
++            return False
+         return self._inputs_embeds.shape[1] > 1
+ 
+     def _apc_checkpoint_column_for_meta(
+@@ -2656,7 +2672,8 @@
+             self._prompt_kwargs[k] = _slice_sequence_aligned_prompt_kwarg(
+                 k, self._prompt_kwargs[k], start=n
+             )
+-        mx.clear_cache()
++        if os.environ.get("MLX_VLM_SERVER_PREFILL_CLEAR_CACHE", "1") == "1":
++            mx.clear_cache()
+         return n
+ 
+     def record_prompt_time(self, elapsed_s: float) -> None:
+diff -ruN a/mlx_vlm/models/inkling2/prefill_fused.py b/mlx_vlm/models/inkling2/prefill_fused.py
+--- a/mlx_vlm/models/inkling2/prefill_fused.py	2026-11-22 20:48:23.801599527 +0100
++++ b/mlx_vlm/models/inkling2/prefill_fused.py	2026-11-22 20:48:23.805599532 +0100
+@@ -492,6 +492,65 @@
+     f = mx.tanh(fl); g = mx.tanh(gl)
+     return (1 - f) * h + g * m
+ _mg_tail_c = mx.compile(_mg_tail)
++def _mg_tail_cast(fl, gl, h, m):
++    # Same arithmetic; the bf16 -> f32 casts happen inside the fused kernel instead of
++    # materializing two f32 copies (exact casts, so the result is bitwise the same).
++    f = mx.tanh(fl); g = mx.tanh(gl)
++    return (1 - f) * h.astype(mx.float32) + g * m.astype(mx.float32)
++_mg_tail_cast_c = mx.compile(_mg_tail_cast)
++_MGC = os.environ.get("PF_MGC", "1") == "1"
++_MGF_SRC = r"""
++    const uint lane = thread_index_in_simdgroup;
++    const uint sg = simdgroup_index_in_threadgroup;
++    const uint r0 = threadgroup_position_in_grid.y * 8;
++    const uint c0 = (threadgroup_position_in_grid.x * NSG_C + sg) * (8 * TC);
++    threadgroup float tf[NSG_C][8 * 8 * TC];
++    threadgroup float tg[NSG_C][8 * 8 * TC];
++    simdgroup_matrix<float, 8, 8> F[TC], G[TC];
++    for (int j = 0; j < TC; ++j) { F[j] = simdgroup_matrix<float, 8, 8>(0); G[j] = simdgroup_matrix<float, 8, 8>(0); }
++    for (int k = 0; k < K; k += 8) {
++        simdgroup_matrix<float, 8, 8> A;
++        simdgroup_load(A, gi + r0 * K + k, K);
++        for (int j = 0; j < TC; ++j) {
++            simdgroup_matrix<float, 8, 8> Bf, Bg;
++            simdgroup_load(Bf, wf + (c0 + 8 * j) * K + k, K, ulong2(0, 0), true);
++            simdgroup_load(Bg, wg + (c0 + 8 * j) * K + k, K, ulong2(0, 0), true);
++            simdgroup_multiply_accumulate(F[j], A, Bf, F[j]);
++            simdgroup_multiply_accumulate(G[j], A, Bg, G[j]);
++        }
++    }
++    for (int j = 0; j < TC; ++j) {
++        simdgroup_store(F[j], &tf[sg][8 * j], 8 * TC);
++        simdgroup_store(G[j], &tg[sg][8 * j], 8 * TC);
++    }
++    simdgroup_barrier(mem_flags::mem_threadgroup);
++    for (int e = lane; e < 64 * TC; e += 32) {
++        uint rr = e / (8 * TC), cc = e % (8 * TC);
++        if (r0 + rr >= R) continue;
++        size_t idx = size_t(r0 + rr) * D + c0 + cc;
++        float f = metal::precise::tanh(tf[sg][e]);
++        float g = metal::precise::tanh(tg[sg][e]);
++        float t1 = 1.0f - f;
++        float a = t1 * float(h[idx]);
++        float b = g * float(m[idx]);
++        out[idx] = a + b;
++    }
++"""
++_MGF = os.environ.get("PF_MGF", "0") == "1"
++def _mg_fused_tail(gi, wf, wg, h, m, TC=8, NC=2):
++    """(1 - tanh(gi @ wf.T)) * h + tanh(gi @ wg.T) * m in one kernel: the f32 K=64 products with
++    the same 8x8 simdgroup MMA k-order as MLX's GEMM, tanh/combine in safe math (bitwise equal)."""
++    R, K = gi.shape; D = wf.shape[0]
++    if "mgf" not in _K:
++        _K["mgf"] = mx.fast.metal_kernel(name="msg_gate_fused_tail", input_names=["gi", "wf", "wg", "h", "m"],
++            output_names=["out"], source=_MGF_SRC, compile_options={"math_mode": "safe"})
++    Rp = (R + 7) // 8 * 8
++    if Rp != R:
++        gi = mx.concatenate([gi, mx.zeros((Rp - R, K), gi.dtype)], axis=0)
++    return _K["mgf"](inputs=[gi, wf, wg, h.reshape(R, D), m.reshape(R, D)],
++        template=[("K", K), ("D", D), ("TC", TC), ("NSG_C", NC), ("R", R)],
++        grid=(D // (8 * TC * NC) * 32 * NC, Rp // 8, 1), threadgroup=(32 * NC, 1, 1),
++        output_shapes=[(R, D)], output_dtypes=[mx.float32])[0]
+ def message_gate_exact(gate, hidden, message):
+     shp = hidden.shape; D = shp[-1]
+     gi = norm_cat_exact(hidden, message, gate.eps).reshape(*shp[:-1], 2 * D)
+@@ -500,7 +559,11 @@
+     if ws is None:
+         ws = (gate.forget_gate_proj.weight.astype(mx.float32), gate.message_gate_proj.weight.astype(mx.float32))
+         mx.eval(ws); gate.__dict__["_wfx"] = ws
++    if _MGF and D % 128 == 0 and gi.shape[-1] % 8 == 0 and hidden.dtype == mx.bfloat16:
++        return _mg_fused_tail(gi.reshape(-1, gi.shape[-1]), ws[0], ws[1], hidden, message).reshape(shp)
+     fl = gi @ ws[0].T; gl = gi @ ws[1].T
++    if _MGC:
++        return _mg_tail_cast_c(fl, gl, hidden, message)
+     return _mg_tail_c(fl, gl, hidden.astype(mx.float32), message.astype(mx.float32))
+ 
+ 
+@@ -573,6 +636,52 @@
+         return (message_gate_exact if _MGX else message_gate_rows)(self, hidden, message)
+     return _orig_mg_call(self, hidden, message)
+ 
++_GU = os.environ.get("PF_GU", "0") == "1"
++def _fused_gate_up(sw):
++    """One gather_qmm for gate+up (N = 2 x intermediate): the checkpoint stores them as one
++    w13 tensor with one global scale, so every output keeps the same K loop."""
++    cached = sw.__dict__.get("_gu")
++    if cached is not None:
++        return cached or None
++    up, gate = sw.up_proj, sw.gate_proj
++    ok = (type(up) is type(gate) and getattr(up, "mode", None) == "nvfp4" and "pre_quant_scale" not in up
++          and "bias" not in up and "bias" not in gate and hasattr(up, "_kernel_factor")
++          and up.weight.shape[0] == gate.weight.shape[0])
++    if not ok:
++        sw.__dict__["_gu"] = False
++        return None
++    fu, fg = up._kernel_factor(up.global_scale), gate._kernel_factor(gate.global_scale)
++    if not bool(mx.all(fu == fg).item()):
++        sw.__dict__["_gu"] = False
++        return None
++    w = mx.concatenate([up.weight, gate.weight], axis=1)
++    sc = mx.concatenate([up.scales, gate.scales], axis=1)
++    mx.eval(w, sc, fu)
++    cached = (w, sc, mx.contiguous(fu), up.group_size, up.bits, up.mode, up.weight.shape[1])
++    sw.__dict__["_gu"] = cached
++    return cached
++
++_PS = os.environ.get("PF_POSTSCALE", "0") == "1"
++def _scale2_f(up, gate, mu, mg):
++    return (up.astype(mx.float32) * mu).astype(up.dtype), (gate.astype(mx.float32) * mg).astype(gate.dtype)
++_scale2 = mx.compile(_scale2_f)
++def _post_scale(sw):
++    cached = sw.__dict__.get("_ps")
++    if cached is not None:
++        return cached or None
++    projs = (sw.up_proj, sw.gate_proj, sw.down_proj)
++    ok = all(hasattr(p, "_kernel_factor") and getattr(p, "mode", None) == "nvfp4" and "pre_quant_scale" not in p
++             and "bias" not in p for p in projs)
++    if not ok:
++        sw.__dict__["_ps"] = False
++        return None
++    mults = [mx.contiguous(p._kernel_factor(p.global_scale).astype(mx.float32) * _PS_UNIT) for p in projs]
++    mx.eval(*mults)
++    u, g, d = projs
++    cached = ((u.weight, u.scales), (g.weight, g.scales), (d.weight, d.scales), *mults, u.group_size, u.bits, u.mode)
++    sw.__dict__["_ps"] = cached
++    return cached
++_PS_UNIT = float(os.environ.get("PF_POSTSCALE_UNIT", str(1.0 / 2688.0)))
+ _orig_moe_call = L.SparseMoE.__call__
+ def moe_call(self, x):
+     sw = self.switch_mlp
+@@ -583,8 +692,34 @@
+         if indices.size >= 64:
+             xx = mx.expand_dims(x, (-2, -3))
+             xs, ii, inv = S._gather_sort(xx, indices)
+-            up = sw.up_proj(xs, ii, sorted_indices=True)
+-            gate = sw.gate_proj(xs, ii, sorted_indices=True)
++            gu = _fused_gate_up(sw) if _GU else None
++            ps = _post_scale(sw) if _PS else None
++            if ps is not None:
++                # MLX-Serve's layout: plain NVFP4 gathers (no per-expert global scale inside the
++                # dequant, so MLX's fp4->half loader applies), the expert's scale applied to the
++                # outputs: inside the SwiGLU for gate/up, folded into the routing weights for down.
++                (wu, su), (wg, sg_), (wd, sd), mu, mg, md, gsz, bits, mode = ps
++                lhs = S.default_lhs_indices(xs)
++                q = lambda w, s, a: mx.gather_qmm(a, w, s, lhs_indices=S.default_lhs_indices(a), rhs_indices=ii,
++                                                  transpose=True, group_size=gsz, bits=bits, mode=mode, sorted_indices=True)
++                up = q(wu, su, xs); gate = q(wg, sg_, xs)
++                tail = (1,) * (up.ndim - ii.ndim)
++                m_u = mu[ii].reshape(*ii.shape, *tail); m_g = mg[ii].reshape(*ii.shape, *tail)
++                h = sw.activation(*_scale2(up, gate, m_u, m_g))
++                y = q(wd, sd, h)
++                d = y.shape[-1]
++                wts = weights.reshape(-1, weights.shape[-1]).astype(mx.float32) * md[indices.reshape(-1, indices.shape[-1])]
++                out = moe_unsort_combine(y.reshape(-1, d), inv.astype(mx.uint32), wts)
++                return out.reshape(*x.shape[:-1], d)
++            if gu is not None:
++                y2 = mx.gather_qmm(xs, gu[0], gu[1], lhs_indices=S.default_lhs_indices(xs), rhs_indices=ii,
++                                   transpose=True, group_size=gu[3], bits=gu[4], mode=gu[5],
++                                   global_scale=gu[2], sorted_indices=True)
++                n_up = gu[6]
++                up, gate = y2[..., :n_up], y2[..., n_up:]
++            else:
++                up = sw.up_proj(xs, ii, sorted_indices=True)
++                gate = sw.gate_proj(xs, ii, sorted_indices=True)
+             y = sw.down_proj(sw.activation(up, gate), ii, sorted_indices=True)
+             d = y.shape[-1]
+             out = moe_unsort_combine(y.reshape(-1, d), inv.astype(mx.uint32),
+diff -ruN a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
+--- a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 20:48:23.797599523 +0100
++++ b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 20:48:23.797599523 +0100
+@@ -48,6 +48,11 @@
+ _DRAFT_COMPILE = _os.environ.get("MLX_VLM_INKLING2_DRAFT_COMPILE", "0") == "1"
+ # Candidate vocabulary for proposals: ids < N plus the prompt's ids (0 = full vocabulary).
+ _DRAFT_VOCAB = int(_os.environ.get("MLX_VLM_INKLING2_DRAFT_VOCAB", "0"))
++# Candidate-list size bucket (the compiled Markov loop is traced per size).
++_DRAFT_VOCAB_BUCKET = int(_os.environ.get("MLX_VLM_INKLING2_DRAFT_VOCAB_BUCKET", "4096"))
++_VOCAB_ORDER = {}
++# Lean incremental draft prefill: per chunk only the global draft layer (async).
++_LEAN_PREFILL = _os.environ.get("MLX_VLM_INKLING2_DRAFT_LEAN_PREFILL", "0") == "1"
+ _DT = _os.environ.get("MLX_VLM_INKLING2_DRAFT_TIMERS", "0") == "1"
+ _DTACC = {}
+ if _DT:
+@@ -372,8 +377,10 @@
+             # answer vocabulary on GSM8K/MMLU-Pro, then English Wikipedia by frequency.
+             import json as _json
+ 
+-            with open(path) as f:
+-                ids = _np.asarray(_json.load(f)[:n], dtype=_np.int64)
++            if path not in _VOCAB_ORDER:
++                with open(path) as f:
++                    _VOCAB_ORDER[path] = _np.asarray(_json.load(f), dtype=_np.int64)
++            ids = _VOCAB_ORDER[path][:n]
+             # Control/format tokens (ids above the text vocabulary).
+             ids = _np.union1d(ids, _np.arange(min(199998, vocab), vocab))
+         else:
+@@ -382,7 +389,7 @@
+         if prompt is not None:
+             extra = _np.asarray(prompt.reshape(-1).tolist(), dtype=_np.int64)
+             ids = _np.union1d(ids, extra[(extra >= 0) & (extra < vocab)])
+-        pad = (-len(ids)) % 256
++        pad = (-len(ids)) % max(256, _DRAFT_VOCAB_BUCKET)
+         if pad:
+             # Pad with the next ids above N (shape bucket for the compiled loop).
+             more = _np.setdiff1d(_np.arange(n, min(vocab, n + 4 * pad + 4096)), ids)[:pad]
+@@ -401,13 +408,13 @@
+             )
+         mh = self.markov_head
+         sub = (idx, w.astype(mx.bfloat16), mh._fold_weight[idx], mh._fold_bias[idx])
+-        mx.eval(*sub)
++        mx.async_eval(*sub)
+         self.__dict__["_vsub"] = sub
+ 
+     def reset(self, target_model):
+         self.bind(target_model)
+         self.accept_lens, self.draft_lens = [], []
+-        if _DRAFT_VOCAB > 0 and _DRAFT_COMPILE:
++        if _DRAFT_VOCAB > 0 and _DRAFT_COMPILE and not self.__dict__.pop("_vsub_ready", False):
+             self._build_vocab_subset()
+         prepared = self.__dict__.pop("_prepared_target_cache", None)
+         if prepared is not None:
+@@ -419,6 +426,10 @@
+     def begin_target_prefill(self, target_model):
+         self.bind(target_model)
+         self.accept_lens, self.draft_lens = [], []
++        if _DRAFT_VOCAB > 0 and _DRAFT_COMPILE and _os.environ.get("MLX_VLM_INKLING2_DRAFT_VOCAB_EARLY", "1") == "1":
++            # Build the candidate list during prefill (the prompt ids are set by then), not at decode start.
++            self._build_vocab_subset()
++            self.__dict__["_vsub_ready"] = True
+         self.__dict__["_prefill_global_tail"] = None
+         return self.make_cache()
+ 
+@@ -433,6 +444,14 @@
+         self.__dict__["_prefill_global_tail"] = [
+             value[:, -1024:] for value in tail_source
+         ]
++        if _LEAN_PREFILL:
++            # Only the global layer keeps every row; the two sliding layers are
++            # projected once, at the finish, from the last 1,024 rows.
++            layer, entry = self.layers[1], cache[1]
++            context = self.mix(mx.concatenate(hidden, axis=-1), 1, layer.dflare_norm)
++            layer.self_attn.prefill_context(context, entry)
++            mx.async_eval(entry.state)
++            return
+         self._project_target_hidden(hidden, cache)
+ 
+     def finish_target_hidden(self, hidden, cache):
+@@ -442,11 +461,23 @@
+             return
+ 
+         final_features = mx.concatenate(hidden, axis=-1)
+-        for index in (0, 2):
+-            layer, entry = self.layers[index], cache[index]
+-            context = self.mix(final_features, index, layer.dflare_norm)
+-            layer.self_attn.prefill_context(context, entry)
+-            mx.eval(entry.state)
++        if _LEAN_PREFILL:
++            prior = int(cache[1].offset)
++            local = mx.concatenate(
++                [mx.concatenate(tail, axis=-1), final_features], axis=1
++            )
++            for index in (0, 2):
++                layer, entry = self.layers[index], cache[index]
++                entry.offset = prior - tail[0].shape[1]
++                context = self.mix(local, index, layer.dflare_norm)
++                layer.self_attn.prefill_context(context, entry)
++                mx.async_eval(entry.state)
++        else:
++            for index in (0, 2):
++                layer, entry = self.layers[index], cache[index]
++                context = self.mix(final_features, index, layer.dflare_norm)
++                layer.self_attn.prefill_context(context, entry)
++                mx.eval(entry.state)
+ 
+         # Rewind only the global logical offset, then replace its last 1024 rows
+         # and append the final prompt token through one GEMM-sized projection.
