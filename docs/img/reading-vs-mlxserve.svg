@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="360" viewBox="0 0 720 360" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="720" height="360" fill="#ffffff"/>
+<text x="24" y="34" font-size="20" font-weight="700" fill="#111827">Reading a prompt (prefill)</text>
+<text x="24" y="58" font-size="13" fill="#6b7280">Server-reported rates, same prompts, draft head on, prefill chunk 2048 · 2 warm runs (MLX-Serve: 1)</text>
+<rect x="81.0" y="123.1" width="105.0" height="172.9" rx="4" fill="#9ca3af"/>
+<text x="133.5" y="115.1" font-size="15" font-weight="700" text-anchor="middle" fill="#111827">1,012.4</text>
+<text x="133.5" y="314.0" font-size="12" text-anchor="middle" fill="#111827">MLX-Serve</text>
+<rect x="198.0" y="128.7" width="105.0" height="167.3" rx="4" fill="#2563eb"/>
+<text x="250.5" y="120.7" font-size="15" font-weight="700" text-anchor="middle" fill="#111827">979.6</text>
+<text x="250.5" y="314.0" font-size="12" text-anchor="middle" fill="#111827">This repo</text>
+<text x="250.5" y="146.7" font-size="11" text-anchor="middle" fill="#ffffff">-3%</text>
+<text x="192.0" y="338.0" font-size="14" font-weight="600" text-anchor="middle" fill="#111827">4k prompt</text>
+<rect x="417.0" y="146.2" width="105.0" height="149.8" rx="4" fill="#9ca3af"/>
+<text x="469.5" y="138.2" font-size="15" font-weight="700" text-anchor="middle" fill="#111827">877.3</text>
+<text x="469.5" y="314.0" font-size="12" text-anchor="middle" fill="#111827">MLX-Serve</text>
+<rect x="534.0" y="148.9" width="105.0" height="147.1" rx="4" fill="#2563eb"/>
+<text x="586.5" y="140.9" font-size="15" font-weight="700" text-anchor="middle" fill="#111827">861.5</text>
+<text x="586.5" y="314.0" font-size="12" text-anchor="middle" fill="#111827">This repo</text>
+<text x="586.5" y="166.9" font-size="11" text-anchor="middle" fill="#ffffff">-2%</text>
+<text x="528.0" y="338.0" font-size="14" font-weight="600" text-anchor="middle" fill="#111827">32k prompt</text>
+<line x1="24" y1="296" x2="696" y2="296" stroke="#e5e7eb"/>
+<text x="696" y="352" font-size="11" text-anchor="end" fill="#6b7280">M4 Max 64 GB, same official weights · tok/s, higher is better</text>
+</svg>

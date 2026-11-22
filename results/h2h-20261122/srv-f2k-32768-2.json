@@ -1,0 +1,22 @@
+{
+ "tag": "f2k-32768-2",
+ "elapsed_s": 40.09115899994504,
+ "ttft_s": 38.15499512501992,
+ "prompt_tokens": 32750,
+ "completion_tokens": 126,
+ "prompt_tps": 858.3410872597484,
+ "decode_tps": 65.0771360997908,
+ "finish_reason": "stop",
+ "chunks": 121,
+ "usage": {
+  "prompt_tokens": 32750,
+  "completion_tokens": 126,
+  "total_tokens": 32876,
+  "prompt_tokens_details": {
+   "cached_tokens": 0
+  }
+ },
+ "needle_found": true,
+ "text_tail": "The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed find archivist's note in document. I saw in the text: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.VIOLET-ANCHOR-4729",
+ "error": null
+}

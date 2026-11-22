@@ -1,0 +1,91 @@
+Logging to /Users/tomascupr/.exo-inkling-bench/mlxserve/logs/serve-official-draft-on.log (rotates at 32 MB)
+mlx-serve 26.11.4-pre-release.1 (MLX 0.32.5)
+[args] model: /Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini
+[args] drafter: <none>
+[args] serve: 127.0.0.1:11241, ctx-size=65536, pld=off, no-vision=true, prevent-sleep=true
+[args] kv-quant: off
+[args] kv-attn-mode: auto
+Metal GPU: true
+Model: inkling2_loop (48 layers, 2304-dim, head_dim=128, 24h/8kv, 0-bit affine quant)
+Loading tokenizer...
+  parsed tokenizer (24 MB) in 69ms
+  loaded 199998 vocab entries in 5ms
+  loaded 424413 merges in 13ms
+Tokenizer loaded: 200058 vocab, 424413 merges, 60 special tokens (byte-level BPE)
+[registry] max_resident_models=3, max_resident_mem=51.8 GB
+[preflight] weights ~18.19 GB, available 36.44 GB
+Loading model-00001-of-00001.safetensors...
+skipping mtp.safetensors: not named by model.safetensors.index.json
+Loaded 822 weights from 1 file(s)
+[plugin] inkling2 serves inkling2_loop (48 layers)
+[suppress] 47 of 60 flagged specials masked from sampling (template + eos exempt); 0 padding rows past id 200058 of 200058
+[suppress] suppress_cjk ready: 31863 CJK tokens of 200058
+[wired] mode=max limit=53084 MB
+Warmup complete (3590 ms).
+Model ready (loaded on inference thread).
+Concurrency: --max-concurrent=1, batched decode on
+Prefill chunk: 2048 tokens (memory-sized down from 8192; --prefill-chunk overrides)
+Context size: 65536 tokens (manual)
+Request timeout: 300s
+Model context length: 1048576 tokens
+Reasoning budget: unlimited
+
+Server listening on http://127.0.0.1:11241
+  GET  /
+  GET  /health
+  GET  /props
+  GET  /v1/models
+  POST /v1/chat/completions
+  POST /v1/completions
+  POST /v1/embeddings
+  POST /v1/decisions, /v1/systemone (Laya, Kev, D1, Clef)
+  POST /v1/messages (Anthropic)
+  POST /v1/responses (OpenAI Responses)
+  POST /v1/responses/compact
+  GET  /v1/responses/{id}
+  DEL  /v1/responses/{id}
+  POST /tokenize
+  POST /detokenize
+
+RSS: 15.4G  Mem: 78%  CPU: 12%  GPU: 78%
+  spec=dspark (inkling2_loop native draft stages, block=8)
+POST /v1/chat/completions (1 msgs, max_tokens=16, temp=0.00, top_p=1.00, top_k=0, stream=true, thinking=true, sys=0b, user=10068b, tools=0b, tool_msgs=0) 
+  > "Below is a long document. Read all of it, then answer the question at the end.
+
+..."
+[admission] needed=3038 MB available=18563 MB reclaimable=0 MB width=2048 verdict=admit
+  prompt=4078 tokens, max_gen=16, ctx=65536
+  mtp=enabled (streaming, depth=6)
+  spec=dspark (inkling2_loop native draft stages, block=8)
+  [spec-stats] mode=dspark attempts=2 accepts=9 avg_per_round=4.50 stage_rounds=2 copy_rounds=0 copy_drafted=0 copy_accepted=0 group_rounds=0
+  [spec-stats] dspark policy: plain_ticks=4 skipped=4 probes=1 plain_ms=16.74 acc_pos=1.00/1.00/1.00/1.00/1.00/0.00 rows_hist=5:1,8:1
+  <- 4078+16 tokens streamed [prefill: 919.3 tok/s, decode: 96.8 tok/s] [length]
+  spec=dspark (inkling2_loop native draft stages, block=8)
+POST /v1/chat/completions (1 msgs, max_tokens=256, temp=0.00, top_p=1.00, top_k=0, stream=true, thinking=true, sys=0b, user=10068b, tools=0b, tool_msgs=0) 
+  > "Below is a long document. Read all of it, then answer the question at the end.
+
+..."
+  prompt=4078 tokens, max_gen=256, ctx=65536
+  mtp=enabled (streaming, depth=6)
+  spec=dspark (inkling2_loop native draft stages, block=8)
+[inkling2] draft verify cut 0.61 (a verified row 0.21 of a plain step)
+  [spec-stats] mode=dspark attempts=23 accepts=51 avg_per_round=2.22 stage_rounds=23 copy_rounds=0 copy_drafted=0 copy_accepted=0 group_rounds=0
+  [spec-stats] dspark policy: plain_ticks=49 skipped=49 probes=9 plain_ms=17.67 acc_pos=0.83/0.77/0.89/1.00/0.83/1.00/1.00 rows_hist=1:5,2:3,3:4,5:3,6:4,7:1,8:3
+  <- 4078+131 tokens streamed [prefill: 1012.4 tok/s, decode: 66.1 tok/s] [stop]
+  spec=dspark (stochastic; inkling2_loop native draft stages, block=8)
+POST /v1/chat/completions (1 msgs, max_tokens=256, temp=0.00, top_p=1.00, top_k=0, stream=true, thinking=true, sys=0b, user=119322b, tools=0b, tool_msgs=0) 
+  > "Below is a long document. Read all of it, then answer the question at the end.
+
+..."
+  prompt=32750 tokens, max_gen=256, ctx=65536
+  mtp=enabled (streaming, depth=6)
+  spec=dspark (inkling2_loop native draft stages, block=8)
+  [spec-stats] mode=dspark attempts=26 accepts=83 avg_per_round=3.19 stage_rounds=26 copy_rounds=0 copy_drafted=0 copy_accepted=0 group_rounds=0
+  [spec-stats] dspark policy: plain_ticks=12 skipped=12 probes=5 plain_ms=19.68 acc_pos=0.85/0.88/1.00/1.00/1.00/0.80/1.00 rows_hist=1:6,2:1,3:3,4:2,5:2,6:1,7:3,8:8
+  <- 32750+125 tokens streamed [prefill: 877.3 tok/s, decode: 74.8 tok/s] [stop]
+  spec=dspark (inkling2_loop native draft stages, block=8)
+  spec=dspark (inkling2_loop native draft stages, block=8)
+  spec=dspark (inkling2_loop native draft stages, block=8)
+
+Shutting down gracefully...
+Warm requests complete (6 of 6, 4247 ms).

@@ -184,3 +184,19 @@ with a draft model, the same tokens as without it.
   visits, so the global relative-attention prefill kernel at 0.5–1M keys (now ~68–76% of 14.2 TFLOP/s depending on
   chunk size) and the chunk size affordable at 1M (step 512 used; 1024 may fit after the conv-state fix) are the levers.
 - Writing at 1M: KV-read bound (32 GiB per token); speculative decoding amortizes it across a verified block.
+
+## 2026-11-22 19:05–19:20 CET: wrap-up (Tomas 19:04: only necessary checks)
+
+- **0016 committed** (draft head proposes from the first 16,384 ids of `data/draft_vocab_order.json` + the prompt's ids,
+  compiled Markov loop; defaults `DRAFT_CONF=0.65 DRAFT_VOCAB=16384 DRAFT_COMPILE=1`). List provenance and rebuild:
+  `scripts/draft_vocab.py` (model's own GSM8K/MMLU-Pro answers without RULER rows, then Wikipedia frequencies);
+  rebuilt byte-identical. The repo patches reproduce the deployed Studio 2 `dspark.py` exactly.
+- **Quality, defaults, stack16 (= install.sh output):** 8-prompt set greedy 8/8 identical to the reference, through the
+  draft head (`top1.py DRAFT=8`).
+- **Server head-to-head, Studio 2:** reading 979.6 vs 1012.4 (4k), 861.5 vs 877.3 (32k); writing 68.6 vs 66.1 (4k),
+  63.2 vs 74.8 (32k). Prefill step 4096 in the server is slower (946 / 839 reading). Only 4k writing wins in the
+  server. The 32k server writing (63) is far below the CLI drafted runs (72–76): not profiled (out of scope).
+- Stopped at wrap-up: vg/dec3 sweeps on Studio 2 (no-draft tuning, vocab-size sweep) and the 524k draft + cv runs on
+  Studio 1, unfinished; no results recorded from them.
+- README rewritten as charts + short text (`scripts/charts.py` → `docs/img/*.svg`); old tables moved to BENCHMARKS.
+  "Fastest" dropped from the headline: the server head-to-head does not support it.

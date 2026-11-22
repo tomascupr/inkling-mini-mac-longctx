@@ -1,0 +1,13 @@
+f4k 4096 0 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 592.30377642767, 'decode_tps': 64.32201726299324, 'needle_found': True, 'error': None}
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=8.787s prefill=838.6 tok/s decode=61.3 tok/s finish_reason=stop in_flight=0
+f4k 4096 1 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 933.6145419803385, 'decode_tps': 70.77776466153684, 'needle_found': True, 'error': None}
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=6.097s prefill=952.1 tok/s decode=68.6 tok/s finish_reason=stop in_flight=0
+f4k 4096 2 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 922.9375877493736, 'decode_tps': 70.63434182298991, 'needle_found': True, 'error': None}
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=6.152s prefill=940.8 tok/s decode=68.4 tok/s finish_reason=stop in_flight=0
+f4k 32768 0 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 833.786160028085, 'decode_tps': 59.43950900939336, 'needle_found': True, 'error': None}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=41.390s prefill=837.2 tok/s decode=57.1 tok/s finish_reason=stop in_flight=0
+f4k 32768 1 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 834.7984054272828, 'decode_tps': 63.92058425447775, 'needle_found': True, 'error': None}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=41.195s prefill=837.8 tok/s decode=61.9 tok/s finish_reason=stop in_flight=0
+f4k 32768 2 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 836.4987645550808, 'decode_tps': 63.87415913048733, 'needle_found': True, 'error': None}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=41.116s prefill=839.4 tok/s decode=61.9 tok/s finish_reason=stop in_flight=0
+SRVDONE

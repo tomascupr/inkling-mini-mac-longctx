@@ -1,0 +1,34 @@
+{
+ "4k prompt": {
+  "mlxserve_prefill_decode": [
+   [
+    1012.4,
+    66.1
+   ]
+  ],
+  "ours_prefill": [
+   978.9,
+   980.3
+  ],
+  "ours_decode": [
+   68.2,
+   68.9
+  ]
+ },
+ "32k prompt": {
+  "mlxserve_prefill_decode": [
+   [
+    877.3,
+    74.8
+   ]
+  ],
+  "ours_prefill": [
+   861.7,
+   861.4
+  ],
+  "ours_decode": [
+   63.2,
+   63.1
+  ]
+ }
+}

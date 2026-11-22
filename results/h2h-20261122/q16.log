@@ -1,0 +1,11 @@
+0 1347 greedy_eq_ref
+1 3324 greedy_eq_ref
+2 8343 greedy_eq_ref
+3 14692 greedy_eq_ref
+4 1480 greedy_eq_ref
+5 4741 greedy_eq_ref
+6 37 greedy_eq_ref
+7 36 greedy_eq_ref
+SUMMARY greedy_identical 8/8  teacher-forced top1 vs fork greedy 0/0 = 0.00%
+SUMMARY teacher-forced top1 vs fork teacher-forced 0/0 = 0.00%
+Q16DONE
