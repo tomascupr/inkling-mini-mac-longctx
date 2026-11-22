@@ -10,3 +10,9 @@ Delta: reading -4.3%, writing +9.4%. CAVEAT: different machine (Studio 1 vs Stud
   MLX-Serve: refused both 1M requests (needs ~45.5 GB, ~33.6 GB available), no numbers.
   Ours: request 0 hit the 600 s token-queue timeout while prefilling (client gave up at 603 s);
   its prefill continued to 294912/1039982 (28.4%), request 1 overlapped and reached 90112 (8.7%) when stopped. No numbers.
+
+Same-machine control, Studio 1, 00:34 CET: TK=4, 32k, identical settings, fresh server:
+  r1 reading 887.9 writing 83.0 | r2 reading 886.9 writing 83.1 | needle 3/3
+  mean drop-first: reading 887.4, writing 83.05
+TK=2 vs TK=4 (same machine): reading +0.01%, writing -0.24% -> no effect; the earlier -4.3%/+9.4% was the Studio 1 vs Studio 2 difference.
+131k TK=2 run skipped (gate was writing gain >=3%). Default stays TK=4. 1M not resumed; Studio 1 left idle.
