@@ -8,6 +8,9 @@ by listing its session log in charts.json and running this script again.
 
 Counting: on both sides, every request except the first one at each prompt length in a session (reported
 separately). MLX-Serve's first 4k request is its own 16-token warm-up.
+If dropping the first request leaves one side with a single run, and counting every run at that length yields a
+smaller (more conservative) delta, the headline, README table and charts use the all-runs figures; both variants
+are in docs/BENCHMARKS.md.
 Rounding never favours this repo: its means are rounded down, MLX-Serve's up, differences (from unrounded means) down.
 Verdict: "faster" only if, in every session, our slowest counted run beats MLX-Serve's fastest one; "behind" if
 MLX-Serve's slowest beats our fastest in every session; otherwise "level".
@@ -161,13 +164,29 @@ def analyse(sessions):
             o_all = [x for r in per for x in r["ours"]]
             f_all = [r["first"] for r in per] + o_all
             full = all(not r["mlxserve_first_is_warmup"] for r in per)
-            rows.append(dict(prompt=p, label=label(p), metric=metric, sessions=per,
-                             mlxserve=t_all, ours=o_all, mlxserve_mean=mean(t_all), ours_mean=mean(o_all),
-                             delta=pct(o_all, t_all), verdict=overall([r["verdict"] for r in per]),
-                             delta_with_first=pct(f_all, t_all),
-                             verdict_with_first=overall([r["verdict_with_first"] for r in per]),
-                             delta_both=pct(f_all, [r["mlxserve_first"] for r in per] + t_all) if full else None,
-                             verdict_both=overall([r["verdict_both"] for r in per]) if full else None))
+            t_both = [r["mlxserve_first"] for r in per] + t_all
+            row = dict(prompt=p, label=label(p), metric=metric, sessions=per,
+                       mlxserve=t_all, ours=o_all, mlxserve_mean=mean(t_all), ours_mean=mean(o_all),
+                       delta=pct(o_all, t_all), verdict=overall([r["verdict"] for r in per]),
+                       delta_with_first=pct(f_all, t_all),
+                       verdict_with_first=overall([r["verdict_with_first"] for r in per]),
+                       delta_both=pct(f_all, t_both) if full else None,
+                       verdict_both=overall([r["verdict_both"] for r in per]) if full else None)
+            # Headline is the drop-first mean, unless that leaves one side with a single run
+            # and counting every run is more conservative (a smaller delta).
+            # Only switch when the 1-decimal headline would actually fall (262k writing,
+            # not 262k reading, where both variants already display as +6.2%).
+            if (full and (len(t_all) == 1 or len(o_all) == 1)
+                    and down(pct(f_all, t_both), 1) < down(row["delta"], 1)):
+                row.update(headline_from="all_runs", headline_mlxserve=t_both, headline_ours=f_all,
+                           headline_mlxserve_mean=mean(t_both), headline_ours_mean=mean(f_all),
+                           headline_delta=pct(f_all, t_both),
+                           headline_verdict=overall([r["verdict_both"] for r in per]))
+            else:
+                row.update(headline_from="warm", headline_mlxserve=t_all, headline_ours=o_all,
+                           headline_mlxserve_mean=row["mlxserve_mean"], headline_ours_mean=row["ours_mean"],
+                           headline_delta=row["delta"], headline_verdict=row["verdict"])
+            rows.append(row)
     return rows
 
 
@@ -178,11 +197,11 @@ def verdict_text(r):
 
 def chart_delta(r):
     """Short delta for the charts: +5.4% when we win, 'level' otherwise, no method text."""
-    if r["verdict"] == "level":
+    if r["headline_verdict"] == "level":
         return "level"
-    if r["verdict"] == "faster":
-        return fmt_pct(r["delta"], 1)
-    return f"{fmt_pct(r['delta'], 1)} behind"
+    if r["headline_verdict"] == "faster":
+        return fmt_pct(r["headline_delta"], 1)
+    return f"{fmt_pct(r['headline_delta'], 1)} behind"
 
 
 def verdict_cell(row, bold=True):
@@ -195,10 +214,10 @@ def verdict_cell(row, bold=True):
 
 
 def readme_delta(row):
-    if row["verdict"] == "faster":
-        return f"**{fmt_pct(row['delta'], 1)}**"
-    if row["verdict"] == "behind":
-        return fmt_pct(row["delta"], 1)
+    if row["headline_verdict"] == "faster":
+        return f"**{fmt_pct(row['headline_delta'], 1)}**"
+    if row["headline_verdict"] == "behind":
+        return fmt_pct(row["headline_delta"], 1)
     return "level"
 
 
@@ -209,9 +228,9 @@ def readme_table(rows, sessions):
     for p in sorted({r["prompt"] for r in rows}):
         rd, wr = by[(p, "reading")], by[(p, "writing")]
         lines.append(f"| {label(p)} ({p:,} tokens) "
-                     f"| {fmt(up(rd['mlxserve_mean']))} → {fmt(down(rd['ours_mean']))}, {readme_delta(rd)} "
-                     f"| {fmt(up(wr['mlxserve_mean']))} → {fmt(down(wr['ours_mean']))}, {readme_delta(wr)} |")
-    lines += ["", "<sub>Same-session warm runs on an M4 Max Mac Studio. Method and every raw run: "
+                     f"| {fmt(up(rd['headline_mlxserve_mean']))} → {fmt(down(rd['headline_ours_mean']))}, {readme_delta(rd)} "
+                     f"| {fmt(up(wr['headline_mlxserve_mean']))} → {fmt(down(wr['headline_ours_mean']))}, {readme_delta(wr)} |")
+    lines += ["", "<sub>Same-session runs on an M4 Max Mac Studio. Method and every raw run: "
               "[docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>"]
     return "\n".join(lines)
 
@@ -224,10 +243,20 @@ def bench_pooled(rows):
     lines = ["| Prompt | | MLX-Serve mean (n, range) | This repo mean (n, range) | Δ | Verdict |",
              "|---|---|---:|---:|---:|---|"]
     for r in rows:
+        t, o = r["headline_mlxserve"], r["headline_ours"]
+        note = " all runs" if r["headline_from"] == "all_runs" else ""
         lines.append(f"| {r['label']} ({r['prompt']:,}) | {r['metric']} "
-                     f"| {fmt(up(r['mlxserve_mean']))} ({len(r['mlxserve'])}, {fmt(min(r['mlxserve']))}–{fmt(max(r['mlxserve']))}) "
-                     f"| {fmt(down(r['ours_mean']))} ({len(r['ours'])}, {fmt(min(r['ours']))}–{fmt(max(r['ours']))}) "
-                     f"| {fmt_pct(r['delta'], 2)} | {verdict_cell(r, bold=False)} |")
+                     f"| {fmt(up(r['headline_mlxserve_mean']))} ({len(t)}, {fmt(min(t))}–{fmt(max(t))}){note} "
+                     f"| {fmt(down(r['headline_ours_mean']))} ({len(o)}, {fmt(min(o))}–{fmt(max(o))}){note} "
+                     f"| {fmt_pct(r['headline_delta'], 2)} | {verdict_cell({'delta': r['headline_delta'], 'verdict': r['headline_verdict']}, bold=False)} |")
+    extras = [r for r in rows if r["headline_from"] == "all_runs"]
+    if extras:
+        lines.append("")
+        for r in extras:
+            lines.append(
+                f"{r['label']} {r['metric']}: the headline is the mean of every run, not the drop-first mean "
+                f"({fmt(up(r['mlxserve_mean']))} → {fmt(down(r['ours_mean']))}, {fmt_pct(r['delta'], 2)}). "
+                f"Dropping the first request leaves one side with a single run, and all-runs is more conservative.")
     return "\n".join(lines)
 
 
@@ -251,16 +280,17 @@ def bench_sessions(rows, sessions):
 
 
 def bench_first(rows):
-    lines = ["| Prompt | | First requests: MLX-Serve → ours | Warm runs only (headline) | "
-             "Our first request counted, MLX-Serve's not | Both first requests counted |",
-             "|---|---|---|---|---|---|"]
+    lines = ["| Prompt | | First requests: MLX-Serve → ours | Drop first request | "
+             "Our first request counted, MLX-Serve's not | All runs counted | Headline |",
+             "|---|---|---|---|---|---|---|"]
     for r in rows:
         firsts = ", ".join(("16-token warm-up" if x["mlxserve_first_is_warmup"] else fmt(x["mlxserve_first"]))
                            + f" → {fmt(x['first'])} ({x['session']})" for x in r["sessions"])
         both = "– (MLX-Serve's is its 16-token warm-up)" if r["delta_both"] is None else \
             f"{fmt_pct(r['delta_both'], 2)}, {r['verdict_both']}"
+        headline = "all runs" if r["headline_from"] == "all_runs" else "drop first"
         lines.append(f"| {r['label']} | {r['metric']} | {firsts} | {fmt_pct(r['delta'], 2)}, {r['verdict']} "
-                     f"| {fmt_pct(r['delta_with_first'], 2)}, {r['verdict_with_first']} | {both} |")
+                     f"| {fmt_pct(r['delta_with_first'], 2)}, {r['verdict_with_first']} | {both} | {headline} |")
     return "\n".join(lines)
 
 
@@ -289,22 +319,27 @@ def replace_block(path, name, body):
 
 def h2h_chart(path, metric, title, rows, sessions):
     rows = [r for r in rows if r["metric"] == metric]
-    fig, ax = plt.subplots(figsize=(8.0, 4.35))
-    fig.subplots_adjust(left=0.05, right=0.98, top=0.70, bottom=0.14)
-    w, gap = 0.34, 0.03
-    top = max(float(max(r["mlxserve_mean"], r["ours_mean"])) for r in rows)
+    fig, ax = plt.subplots(figsize=(8.8, 4.35))
+    fig.subplots_adjust(left=0.04, right=0.98, top=0.70, bottom=0.14)
+    w, gap = 0.32, 0.04
+    top = max(float(max(r["headline_mlxserve_mean"], r["headline_ours_mean"])) for r in rows)
     for i, r in enumerate(rows):
-        for xc, m, col, txt in ((i - w / 2 - gap, r["mlxserve_mean"], THEIRS, fmt(up(r["mlxserve_mean"]))),
-                                (i + w / 2 + gap, r["ours_mean"], OURS, fmt(down(r["ours_mean"])))):
+        pair = ((i - w / 2 - gap, r["headline_mlxserve_mean"], THEIRS, fmt(up(r["headline_mlxserve_mean"]))),
+                (i + w / 2 + gap, r["headline_ours_mean"], OURS, fmt(down(r["headline_ours_mean"]))))
+        # figsize 8.8 in at 100 dpi, axes ~0.94 of the width
+        unit = 8.8 * X_DPI * 0.94 / (len(rows) + 0.2)
+        close = labels_overlap(pair[0][3], pair[1][3], 11, pair[0][0], pair[1][0], unit)
+        for j, (xc, m, col, txt) in enumerate(pair):
             ax.bar(xc, float(m), w, color=col, zorder=2)
-            ax.text(xc, float(m) + top * 0.03, txt, ha="center", va="bottom", fontsize=11,
+            lift = top * (0.10 if close and j == 1 else 0.025)
+            ax.text(xc, float(m) + lift, txt, ha="center", va="bottom", fontsize=11,
                     color=INK, fontweight="bold", zorder=4)
         d = chart_delta(r)
-        ax.text(i, top * 1.14, d, ha="center", va="bottom", fontsize=13.5, fontweight="bold",
-                color={"faster": OURS, "behind": LOSS, "level": MUTED}[r["verdict"]])
+        ax.text(i, top * (1.18 if close else 1.14), d, ha="center", va="bottom", fontsize=13, fontweight="bold",
+                color={"faster": OURS, "behind": LOSS, "level": MUTED}[r["headline_verdict"]])
     ax.set_xticks(range(len(rows)), [r["label"] for r in rows], fontsize=13)
     ax.set_xlim(-0.6, len(rows) - 0.4)
-    ax.set_ylim(0, top * 1.34)
+    ax.set_ylim(0, top * 1.36)
     ax.set_yticks([])
     ax.tick_params(axis="x", length=0, pad=8)
     for s in ("top", "right", "left"):
@@ -324,22 +359,48 @@ def fit(text, px, largest):
     return min(largest, px / em * 72 / X_DPI)
 
 
+def text_em(text):
+    return sum(0.64 if c.isdigit() else 0.62 if c.isalpha() or c in "%+−" else 0.3 for c in text)
+
+
+def labels_overlap(txt0, txt1, fs, xc0, xc1, unit):
+    """True if two centred labels at fontsize `fs` would overlap, given x-units in `unit` pixels."""
+    return (text_em(txt0) + text_em(txt1)) * fs * X_DPI / 72 / 2 >= abs(xc1 - xc0) * unit * 0.92
+
+
+def x_val(x):
+    """Value label for the X renders: no thousands separator, so 4k reading stays larger."""
+    return f"{x:.1f}"
+
+
 def x_panel(ax, rows, title=None):
-    w, gap = 0.32, 0.045
-    top = max(float(max(r["mlxserve_mean"], r["ours_mean"])) for r in rows)
+    w, gap = 0.30, 0.05
+    top = max(float(max(r["headline_mlxserve_mean"], r["headline_ours_mean"])) for r in rows)
     ax.set_facecolor(X_BG)
-    ax.set_xlim(-0.55, len(rows) - 0.45)
-    ax.set_ylim(0, top * 1.36)
-    unit = ax.get_window_extent().width / (len(rows) + 0.1)
+    ax.set_xlim(-0.58, len(rows) - 0.42)
+    ax.set_ylim(0, top * 1.42)
+    unit = ax.get_window_extent().width / (len(rows) + 0.16)
     for i, r in enumerate(rows):
-        for xc, m, col, txt in ((i - w / 2 - gap, r["mlxserve_mean"], X_THEIRS, fmt(up(r["mlxserve_mean"]))),
-                                (i + w / 2 + gap, r["ours_mean"], X_OURS, fmt(down(r["ours_mean"])))):
+        pair = ((i - w / 2 - gap, r["headline_mlxserve_mean"], X_THEIRS, x_val(up(r["headline_mlxserve_mean"]))),
+                (i + w / 2 + gap, r["headline_ours_mean"], X_OURS, x_val(down(r["headline_ours_mean"]))))
+        # Use a large side-by-side size when it stays readable; otherwise stagger
+        # and keep the larger type (needed for 4k reading on the combined X chart).
+        ems = text_em(pair[0][3]) + text_em(pair[1][3])
+        dist = abs(pair[1][0] - pair[0][0]) * unit * 0.92
+        fs_side = min(22, dist * 2 * 72 / X_DPI / ems) if ems else 22
+        if fs_side >= 14:
+            fs, close = fs_side, False
+        else:
+            fs, close = min(fit(txt, unit * 0.50, 22) for *_, txt in pair), True
+        for j, (xc, m, col, txt) in enumerate(pair):
             ax.bar(xc, float(m), w, color=col, zorder=2)
-            ax.text(xc, float(m) + top * 0.035, txt, ha="center", va="bottom", color=X_INK, fontweight="bold",
-                    fontsize=fit(txt, unit * w * 0.95, 26))
+            lift = top * (0.12 if close and j == 1 else 0.03)
+            ax.text(xc, float(m) + lift, txt, ha="center", va="bottom", color=X_INK, fontweight="bold",
+                    fontsize=fs)
         txt = chart_delta(r)
-        ax.text(i, top * 1.16, txt, ha="center", va="bottom", fontweight="bold", fontsize=fit(txt, unit * 0.85, 32),
-                color={"faster": X_GAIN, "behind": X_LOSS, "level": "#cbd5e1"}[r["verdict"]])
+        ax.text(i, top * (1.22 if close else 1.16), txt, ha="center", va="bottom", fontweight="bold",
+                fontsize=fit(txt, unit * 0.85, 30),
+                color={"faster": X_GAIN, "behind": X_LOSS, "level": "#cbd5e1"}[r["headline_verdict"]])
     ticks = [r["label"] for r in rows]
     ax.set_xticks(range(len(rows)), ticks, fontsize=min(fit(t, unit * 0.7, 26) for t in ticks), color=X_INK)
     ax.set_yticks([])
@@ -439,10 +500,15 @@ def main():
     summary = [{k: v for k, v in r.items()} for r in rows]
     json.dump(as_json(summary), open(os.path.join(H2H, "summary.json"), "w"), indent=1)
     for r in rows:
+        extra = ""
+        if r["headline_from"] != "warm":
+            extra = (f"  HEADLINE all-runs {fmt(up(r['headline_mlxserve_mean']))} → "
+                     f"{fmt(down(r['headline_ours_mean']))}  {fmt_pct(r['headline_delta'], 2)}  {r['headline_verdict']}")
         print(f"{r['label']:>5} {r['metric']:<8} MLX-Serve {fmt(up(r['mlxserve_mean']))}  ours {fmt(down(r['ours_mean']))}  "
               f"{fmt_pct(r['delta'], 2)}  {r['verdict']}  (our first counted: {fmt_pct(r['delta_with_first'], 2)}, "
               f"{r['verdict_with_first']}; both counted: "
-              + ("-" if r["delta_both"] is None else f"{fmt_pct(r['delta_both'], 2)}, {r['verdict_both']}") + ")")
+              + ("-" if r["delta_both"] is None else f"{fmt_pct(r['delta_both'], 2)}, {r['verdict_both']}")
+              + extra + ")")
 
 
 if __name__ == "__main__":
