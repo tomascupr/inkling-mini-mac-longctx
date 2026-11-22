@@ -6,6 +6,21 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **14:11–14:30 — per-visit profile at 1M depth: the "depth-growing" non-attention cost is MLX allocator thrash, not
+  depth** (`results/profile-20261122/`). At 1M depth the 40 non-global visits of a 2048-token chunk took 54.9 ms each
+  vs 42.7 ms at depth 0. The same slowdown appears at depth 0 when 32 GiB of unrelated MLX arrays are held (51.6 ms)
+  or with `mx.set_cache_limit(0)` (51.5 ms); 28–30 GiB of ballast costs nothing, 31 GiB +14%, 32 GiB +22%. Cause
+  (MLX 0.32.4 `metal/allocator.cpp`): once active + cache + request ≥ `gc_limit` = 0.95 × recommended working set
+  (49.25 GiB here), every buffer-cache miss releases the cache, so ops allocate fresh Metal buffers. At 1M the weights
+  (17.6 GiB) + reserved KV (32 GiB) sit at 49.6 GiB for the whole prefill. `gc_limit` can't be raised from user space
+  (it's capped by the recommended working set, i.e. the wired-limit sysctl). The 8 global attention visits run at the
+  microbench rate in the model (2.49 s vs 2.47 s), so there's no hidden attention overhead.
+- **Fix (exact): keep the two vocabulary tables in host memory during the chunked prefill** (`MLX_VLM_EXACT_HOST_VOCAB=1`,
+  `mkhost.py` on `generate/ar.py`). `embed_tokens` and `lm_head` (2 × 0.86 GiB bf16) move into numpy before the chunk
+  loop; chunk embeddings are a host row gather (a copy) + the same `embed_norm`; chunk graphs never evaluate logits; both
+  tables go back to MLX before the last token's step. At 1M depth: non-global visits 54.9 → 42.6 ms, 2048-token chunk
+  22.15 → 21.57 s (−2.6%); with KT=3 20.83 s (−6.0%). Tokens + logprob sha equal to the fork at 4k and 32k (Studio 2).
+  1M end-to-end run with both started 14:30 CET.
 - **14:07 — 1M on the current build at step 2048: reading 156.0 → 163.3 tok/s (+4.7%), writing 10.04 → 11.36 tok/s
   (+13%), peak 50.76 of 51.84 GiB, needle found** (`results/gates/h6-1m-step2048.json`). Gains come from the bigger
   prefill chunk (fits since the conv-state fix; the synthetic-depth probe predicted +7.6% and 50.58 GiB) and the decode
