@@ -1,6 +1,6 @@
 # Run Inkling-2-Mini faster on a single Mac
 
-We made Thinking Machines' Inkling-2-Mini **write answers up to 2.5× faster** and **read long documents up to 1.8× faster**
+We made Thinking Machines' Inkling-2-Mini **write answers up to 2.8× faster** and **read long documents up to 1.8× faster**
 on one 64 GB Mac Studio, at full quality: our patches leave the model's output **bit-for-bit unchanged**. The model supports up to 1M tokens of context,
 and we measured it at the full 1M on one Mac (the hidden fact was found; outputs are checked bit-for-bit through 262k).
 
@@ -12,12 +12,14 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 
 | Prompt length | Reading: before → after | Writing: before → after | Speed-up (reading / writing) |
 |---|---|---|---|
-| 4k tokens | 758.4 → **951.8** | 33.1 → **50.6** | 1.25× / 1.53× |
-| 32k tokens | 667.9 → **865.3** | 27.0 → **47.2** | 1.30× / 1.75× |
-| 131k tokens | 401.9 → **624.3** | 16.2 → **35.8** | 1.55× / 2.21× |
-| 262k tokens | 256.4 → **453.6** | 10.7 → **27.0** | 1.77× / 2.52× |
+| 4k tokens | 758.4 → **952.4** | 33.1 → **56.9** | 1.26× / 1.72× |
+| 32k tokens | 667.9 → **867.3** | 27.0 → **53.7** | 1.30× / 1.99× |
+| 131k tokens | 401.9 → **625.2** | 16.2 → **40.2** | 1.56× / 2.48× |
+| 262k tokens | 256.4 → **453.9** | 10.7 → **29.8** | 1.77× / 2.78× |
 | 524k tokens | not measured* → **292.6** | not measured* → **17.9** | – |
 | 1M tokens | not measured* → **156.0** | not measured* → **10.0** | – |
+
+The 524k and 1M rows were measured with the previous build (writing ~10–12% slower than today's at 4k–262k); they will be re-run.
 
 \* We have no 524k or 1M run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes (peak 35.3 GiB of GPU memory) and the full 1M-token document (1,048,558 tokens) in 1 h 52 min (peak 50.0 of the 51.8 GiB GPU limit), and found the hidden fact both times.
 
@@ -33,14 +35,14 @@ in **1.5 s** (1.46–1.54 s measured), because the Mac keeps the document's proc
 
 Inkling-2-Mini ships a small draft head (DSpark) that guesses several words ahead; the big model then checks
 all the guesses in one pass, so the answer is the same, just written faster. The standard build already supports it.
-Our optional `0005` patch (install with `DSPARK=1`) makes the checking step a compiled program that reads the
+Our optional `0005` patch (install with `DSPARK=1`; it applies to the previous build, `stacked-v4.patch`, until it is ported) makes the checking step a compiled program that reads the
 long document's memory once per check instead of once per guessed word:
 
 | Writing speed (tok/s) | 4k prompt | 32k prompt | 131k prompt |
 |---|---:|---:|---:|
 | Standard build, no draft | 33.1 | 27.0 | 16.2 |
 | Standard build + draft head | 58.8 | – | – |
-| This repo, no draft | 50.6 | 47.2 | 35.8 |
+| This repo (previous build `stacked-v4`), no draft | 50.6 | 47.2 | 35.8 |
 | **This repo + draft head + `0005`** | **65.5** (block 5) | **63.8** (block 8) | **53.5** (block 8) |
 
 Same output tokens as without the draft in every run (checked token by token). The 4k first request is 63.5
@@ -88,7 +90,7 @@ code), not in accuracy. Same run: 1.3× faster reading and 1.8× faster writing 
 
 - **1M tokens on one Mac:** measured (above). Next: speculative decoding and the prefix cache at 1M.
 - **Speculative decoding** at 262k+ and combined with the prefix cache: not measured yet.
-- More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~58–65% of its memory bandwidth on decode.
+- More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~66–78% of its memory bandwidth on decode (32k–262k).
 
 ## Credits
 

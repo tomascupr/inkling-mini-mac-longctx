@@ -15,12 +15,12 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 
 | Context (prompt tokens) | Prefill tok/s | Decode tok/s | Peak MLX GiB | Stock prefill / decode / peak | Speed-up (prefill / decode) | Exactness |
 |---|---:|---:|---:|---|---|---|
-| 4k (4,078) | **951.8** | **50.64** | **19.46** | 758.4 / 33.09 / 25.58 | 1.25× / 1.53× | bit-identical to unpatched code |
-| 32k (32,750) | **865.3** | **47.23** | **20.34** | 667.9 / 27.0 / 28.27 | 1.30× / 1.75× | bit-identical to unpatched code |
-| 131k (131,054) | **624.3** | **35.80** | **23.34** | 401.9 / 16.2 / 33.58 | 1.55× / 2.21× | bit-identical to unpatched code |
-| 262k (262,126) | **453.6** | **27.01** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.52× | bit-identical to unpatched code |
-| 524k (524,270) | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
-| 1M (1,048,558), step 512, text-only | **156.0** | **10.04** | **50.04** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
+| 4k (4,078) | **952.4** | **56.85** | **19.46** | 758.4 / 33.09 / 25.58 | 1.26× / 1.72× | bit-identical to unpatched code |
+| 32k (32,750) | **867.3** | **53.73** | **20.34** | 667.9 / 27.0 / 28.27 | 1.30× / 1.99× | bit-identical to unpatched code |
+| 131k (131,054) | **625.2** | **40.16** | **23.36** | 401.9 / 16.2 / 33.58 | 1.56× / 2.48× | bit-identical to unpatched code |
+| 262k (262,126) | **453.9** | **29.76** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.78× | bit-identical to unpatched code |
+| 524k (524,270), previous build | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
+| 1M (1,048,558), step 512, text-only, previous build | **156.0** | **10.04** | **50.04** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
 
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
 *without* a draft model. The standard build can already use Inkling's DSpark draft head: on the same Mac, 4k prompt,
@@ -58,7 +58,12 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
 - "Stock" = `internet-projects/inkling2-mlx` v0.2.0 (mlx-vlm `0.8.0+inkling2mini.2`) on the
   same Mac, same weights and prompts; it needed smaller prefill steps (1024 / 512 / 256) to fit.
 - Starting code (unpatched betizzel fork) at step 2048, the reference for the bit-identity check: 845.5 / 33.46 / 26.19 GiB at 32k and 605.1 / 27.13 / 29.62 GiB at 131k.
-- 4k, 32k and 131k rows: current `stacked.patch` (2026-11-22 03:20 CET), recommended env, gate log
+- 4k–262k rows (updated 2026-11-22 11:08–11:24 CET): current `stacked.patch` (= 0001 + the decode track's final 0002 + 0003),
+  recommended env, one gate run `results/gates/gate-stack6-20261122-1108.log`, runs `results/gates/s6-*.json`; tokens
+  AND logprob sha256 identical to the unpatched fork at all four lengths (references below). Reading is unchanged from
+  the previous build (within 0.3%); writing is +10–14% (previous build: 50.64 / 47.23 / 35.80 / 27.01).
+  The 524k and 1M rows are the previous build (`stacked-v4.patch`).
+- Previous build's 4k, 32k and 131k rows: `stacked-v4.patch` (2026-11-22 03:20 CET), recommended env, gate log
   `results/gates/gate-20261122-0320.log`, runs `results/gates/gate-*.json`. The 4k reference is the unpatched fork at 4k
   (941.5 / 35.27 / 25.10 GiB). The 262k and 524k rows are the headline runs
   (`results/gates/headline-20261122.log`, `results/gates/h-524k.json`, `results/gates/h-262k.json`); the 262k
@@ -85,8 +90,9 @@ optimization log, step 2048; it was not part of the exactness gate.
 | File | What | Author / track |
 |---|---|---|
 | `patches/stacked.patch` | **Use this.** 0001 + 0002 + 0003 combined, against the fork. Gated above. | |
+| `patches/stacked-v4.patch` | The previous combined build (2026-11-22 03:20; behind the 524k/1M rows and the quality benchmark). `install.sh` uses it with `DSPARK=1`, because 0005 was built on it. | |
 | `patches/0001-exact-longctx-memory.patch` | Memory: last-token-only head (`logits_to_keep`), per-chunk text embedding, one-shot KV reservation (no concat growth), optional per-visit eval in prefill (`MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1`). Switches: `MLX_VLM_EXACT_CHUNK_EMBED=0`, `MLX_VLM_EXACT_KV_RESERVE=0`. 32k peak 26.2 → 22.2 GiB. | memory track |
-| `patches/0002-compiled-decode.patch` | Decode: one `mx.compile`d decode step (fewer graph nodes and kernels per token), wired into `generate_step`; v3 (2026-11-22 03:20) adds about a dozen fused kernels that copy MLX's own arithmetic order (attention-residual mixing, router, MoE output combine with its short convolution, l2-clips, norms, conv-state updates, merged attention projections), a decode attention kernel whose cost follows the live context length rather than the reserved KV size, and a fix so the saved conv state no longer keeps a whole prefill chunk alive (prefill working memory 0.43 GiB per 512-token step; projected 1M peak ~50.0 GiB). All bit-identical. Applies on top of 0001. | Claude track |
+| `patches/0002-compiled-decode.patch` | Decode: one `mx.compile`d decode step (fewer graph nodes and kernels per token), wired into `generate_step`; v4 (2026-11-22 08:16, current) adds a fused MoE decode (router → top-k + gate/up + SwiGLU, then down + combine), o_proj with the attention gate and tail, fused message gates, multi-query attention residuals, a custom bf16 GEMV for the projections and an MLX-replica sliding-window attention with the bias read in place; v3 (03:20) added about a dozen fused kernels that copy MLX's own arithmetic order (attention-residual mixing, router, MoE output combine with its short convolution, l2-clips, norms, conv-state updates, merged attention projections), a decode attention kernel whose cost follows the live context length rather than the reserved KV size, and a fix so the saved conv state no longer keeps a whole prefill chunk alive (prefill working memory 0.43 GiB per 512-token step; projected 1M peak ~50.0 GiB). All bit-identical. Applies on top of 0001. | Claude track |
 | `patches/0003-prefill-attn-moe.patch` | Prefill: relative-attention kernel tiles (BQ=64, fast mask, global visits only) and a sort-free inverse permutation in the MoE (SwitchGLU) path, value-identical. Applies on top of 0001 + 0002. (Codex's compiled loop message gate, +0.6% prefill, is left out: it disabled the compiled decode path.) | Codex track |
 | `patches/0004-prefix-cache.patch` | Prefix cache: keep the fused attention kernel after a cached prefix is restored (no full mask over the whole cache), keep the conversation's reasoning effort in compaction so it hits the checkpoint, tests. Applies to the fork, and on top of `stacked.patch` (with fuzz). | prefix-cache track |
 | `patches/0005-dspark-compiled-verify.patch` | Optional, on top of `stacked.patch`: faster speculative decoding with the DSpark draft head (incremental draft-prompt capture, compiled block verify, offset-only rollback, shared split-K verify attention). Opt-in via the three env vars above; without a draft model, outputs are bit-identical to `stacked.patch`. Not yet combinable with 0004. | DSpark track (Codex) |
@@ -145,11 +151,11 @@ Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 
 | Context | GB/token | Floor ms | Ceiling tok/s | Measured | % of ceiling |
 |---|---:|---:|---:|---:|---:|
-| 32k | 6.74 | 12.34 | 81.0 | 47.23 | 58% |
-| 131k | 9.96 | 18.24 | 54.8 | 35.80 | 65% |
-| 262k | 14.26 | 26.11 | 38.3 | 27.01 | 71% |
-| 524k | 22.85 | 41.85 | 23.9 | 17.86 | 75% |
-| 1M | 40.03 | 73.3 | 13.6 | 10.04 | 74% |
+| 32k | 6.74 | 12.34 | 81.0 | 53.73 | 66% |
+| 131k | 9.96 | 18.24 | 54.8 | 40.16 | 73% |
+| 262k | 14.26 | 26.11 | 38.3 | 29.76 | 78% |
+| 524k (previous build) | 22.85 | 41.85 | 23.9 | 17.86 | 75% |
+| 1M (previous build) | 40.03 | 73.3 | 13.6 | 10.04 | 74% |
 
 The remaining decode gap is mostly CPU-side graph build/encode (~17 ms/token) and CPU↔GPU
 coupling, not GPU work: with large command buffers the GPU alone needs ~19.8 ms/token at 32k. Details: `docs/trackB-decode-notes.md`.

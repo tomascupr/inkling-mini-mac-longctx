@@ -23,7 +23,9 @@ mkdir -p "$ROOT/src" && cd "$ROOT/src"
 [ -f fork-$BASE.zip ] || curl -fsSL -o fork-$BASE.zip "https://github.com/betizzel/mlx-vlm/archive/$BASE.zip"
 rm -rf base stacked "mlx-vlm-$BASE"
 unzip -q fork-$BASE.zip && mv "mlx-vlm-$BASE" base && cp -R base stacked
-(cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/stacked.patch")
+# 0005 (DSpark) was built on the previous stack (stacked-v4.patch); with DSPARK=1 that one is used.
+if [ "${DSPARK:-0}" = 1 ]; then STACK=stacked-v4.patch; else STACK=stacked.patch; fi
+(cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/$STACK")
 if [ "${PREFIX:-0}" = 1 ] && [ "${DSPARK:-0}" = 1 ]; then
     echo "PREFIX=1 and DSPARK=1 cannot be combined yet" >&2; exit 1
 fi
