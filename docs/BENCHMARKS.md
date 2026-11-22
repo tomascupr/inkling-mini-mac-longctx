@@ -18,7 +18,8 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 4k (4,078) | **951.8** | **50.64** | **19.46** | 758.4 / 33.09 / 25.58 | 1.25× / 1.53× | bit-identical to unpatched code |
 | 32k (32,750) | **865.3** | **47.23** | **20.34** | 667.9 / 27.0 / 28.27 | 1.30× / 1.75× | bit-identical to unpatched code |
 | 131k (131,054) | **624.3** | **35.80** | **23.34** | 401.9 / 16.2 / 33.58 | 1.55× / 2.21× | bit-identical to unpatched code |
-| 262k (262,126), default env, previous patch version | **448.7** | **23.86** | **33.06** | 256.4 / 10.7 / 35.38 | 1.75× / 2.23× | needle found (no 262k unpatched reference run) |
+| 262k (262,126) | **453.6** | **27.01** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.52× | bit-identical to unpatched code |
+| 524k (524,270) | **292.6** | **17.86** | **35.35** | not measured (stopped after 14 min, still reading) | – | needle found (no 524k unpatched reference run) |
 
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
 *without* a draft model. The standard build can already use Inkling's DSpark draft head: on the same Mac, 4k prompt,
@@ -58,8 +59,9 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
 - Starting code (unpatched betizzel fork) at step 2048, the reference for the bit-identity check: 845.5 / 33.46 / 26.19 GiB at 32k and 605.1 / 27.13 / 29.62 GiB at 131k.
 - 4k, 32k and 131k rows: current `stacked.patch` (2026-11-22 03:20 CET), recommended env, gate log
   `results/gates/gate-20261122-0320.log`, runs `results/gates/gate-*.json`. The 4k reference is the unpatched fork at 4k
-  (941.5 / 35.27 / 25.10 GiB). The 262k row is the previous patch version (before decode v2) in the default MLX env
-  (`results/gates/gate-default-env.log`). The prefix-cache row is the fork's server
+  (941.5 / 35.27 / 25.10 GiB). The 262k and 524k rows are the headline runs
+  (`results/gates/headline-20261122.log`, `results/gates/h-524k.json`, `results/gates/h-262k.json`); the 262k
+  reference is the unpatched fork at 262k, step 2048 (439.0 / 21.81 / 34.18 GiB, `results/gates/h-262k-stock.json`). The prefix-cache row is the fork's server
   with APC on plus `0004-prefix-cache.patch` (the unpatched fork also hits the cache,
   in about 2.0 s, once APC is on). 0004 has not yet been measured stacked with the speed patches.
 - Raw data: `results/gates/` (patched runs), `results/reference/` (unpatched references),
@@ -67,9 +69,9 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
   (server log: cold `time_to_first_token=218.274s`, follow-up `cached_tokens=131006`, `time_to_first_token=1.459s`;
   the table uses the client-side times), `results/LEADERBOARD.tsv` (every experiment).
 
-Not yet measured with the patches: 524k and 1M. *Estimate:* with the recommended env
-and step 512, a 1M-token context projects to ~50.6 GiB peak against the 51.84 GiB cap
-(32 GiB of bf16 global KV + 17.6 GiB text weights + ~1.0 GiB per-step working memory).
+1M: a full 1M-token needle run (recommended env, step 512, text-only) started 2026-11-22 05:15 CET and is not measured yet.
+*Estimate:* it projects to ~50.0 GiB peak against the 51.84 GiB cap (32 GiB of bf16 global KV + 17.6 GiB text weights
++ ~0.4 GiB per-step working memory).
 
 4k row: "before" measured 2026-11-22 02:25 CET (Europe/Prague) on the unmodified standard build with the same
 `bench_longctx.py` and settings as the other baseline runs (bf16 KV, no draft, step 2048, 256 max tokens, needle found;
@@ -125,10 +127,11 @@ N tokens. (An earlier count charged every token the last chunk's depth, which ov
 |---|---:|---:|---:|---:|
 | 32k | 10.95 | 1,297 | 865.3 | 66.7% |
 | 131k | 15.78 | 900 | 624.3 | 69.4% |
-| 262k | 22.22 | 639 | 448.7 | 70.2% |
+| 262k | 22.22 | 639 | 453.6 | 71.0% |
+| 524k | 35.11 | 404 | 292.6 | 72.4% |
 
 At 524k this is 18.4 PFLOP for the whole prompt (73% global attention), a floor of
-~19–22 min (*estimate*). Where prefill time goes now: big matmuls run at ~96% of peak and
+~21.6 min at peak; measured 29.9 min. Where prefill time goes now: big matmuls run at ~96% of peak and
 expert GEMMs ~79%, but small ops (router ~29%, message gate ~14%) pull a whole chunk to ~66%.
 Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 
@@ -141,7 +144,8 @@ Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 |---|---:|---:|---:|---:|---:|
 | 32k | 6.74 | 12.34 | 81.0 | 47.23 | 58% |
 | 131k | 9.96 | 18.24 | 54.8 | 35.80 | 65% |
-| 262k | 14.26 | 26.11 | 38.3 | 23.86 (previous version) | 62% |
+| 262k | 14.26 | 26.11 | 38.3 | 27.01 | 71% |
+| 524k | 22.85 | 41.85 | 23.9 | 17.86 | 75% |
 
 The remaining decode gap is mostly CPU-side graph build/encode (~17 ms/token) and CPU↔GPU
 coupling, not GPU work: with large command buffers the GPU alone needs ~19.8 ms/token at 32k. Details: `docs/trackB-decode-notes.md`.

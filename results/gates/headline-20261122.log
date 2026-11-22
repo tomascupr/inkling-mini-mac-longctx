@@ -1,0 +1,9 @@
+2026-11-22 04:25:21 CET START headline (overlay ovH = stacked candidate snapshot)
+2026-11-22 04:25:21 CET RUN 524k stacked recommended-env step2048
+{"ctx": 524288, "step": 2048, "max_tokens": 256, "elapsed_s": 1799.8548922918271, "prompt_tokens": 524270, "prompt_tps": 292.563421131442, "decode_tps": 17.8580521270547, "gen_tokens": 132, "peak_mlx_GiB": 35.34790915250778, "needle_found": true, "logprobs_sha
+2026-11-22 04:55:25 CET RUN 262k stacked recommended-env step2048
+{"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 582.9263209591154, "prompt_tokens": 262126, "prompt_tps": 453.6237939998937, "decode_tps": 27.007206843608746, "gen_tokens": 129, "peak_mlx_GiB": 27.345956027507782, "needle_found": true, "logprobs_
+2026-11-22 05:05:14 CET RUN 262k stock fork (no overlay, default env) step2048
+{"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 603.2904902079608, "prompt_tokens": 262126, "prompt_tps": 439.01836167776537, "decode_tps": 21.80854348627794, "gen_tokens": 129, "peak_mlx_GiB": 34.178756192326546, "needle_found": true, "logprobs_
+262k exactness stacked(recommended env) vs stock fork: tokens_equal True sha_equal True stock ptps 439.0 dtps 21.81 peak 34.18 | stacked ptps 453.6 dtps 27.01 peak 27.35
+2026-11-22 05:15:21 CET RUN 1M stacked recommended-env step512 text-only

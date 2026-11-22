@@ -1,8 +1,8 @@
 # Run Inkling-2-Mini faster on a single Mac
 
-We made Thinking Machines' Inkling-2-Mini **write answers up to 2.2× faster** and **read long documents up to 1.75× faster**
+We made Thinking Machines' Inkling-2-Mini **write answers up to 2.5× faster** and **read long documents up to 1.8× faster**
 on one 64 GB Mac Studio, at full quality: our patches leave the model's output **bit-for-bit unchanged**. The model supports up to 1M tokens of context;
-we have measured up to 262k tokens on one Mac so far.
+we have measured up to 524k tokens on one Mac so far (a 1M-token run is in progress).
 
 **Before** = the standard MLX build people use to run Inkling-2-Mini on a Mac today (inkling2-mlx v0.2.0).
 **After** = this repo: a community fork of that MLX code plus our patches (credits below). Same Mac (M4 Max, 64 GB), same official weights, same prompts.
@@ -15,11 +15,12 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 | 4k tokens | 758.4 → **951.8** | 33.1 → **50.6** | 1.25× / 1.53× |
 | 32k tokens | 667.9 → **865.3** | 27.0 → **47.2** | 1.30× / 1.75× |
 | 131k tokens | 401.9 → **624.3** | 16.2 → **35.8** | 1.55× / 2.21× |
-| 262k tokens* | 256.4 → **448.7** | 10.7 → **23.9** | 1.75× / 2.23× |
+| 262k tokens | 256.4 → **453.6** | 10.7 → **27.0** | 1.77× / 2.52× |
+| 524k tokens | not measured* → **292.6** | not measured* → **17.9** | – |
 
-\* 262k was measured with the previous version of our patches (writing has since sped up 15–24% at 4k–131k; 262k not re-run yet).
+\* Our 524k run on the standard build was stopped after 14 minutes, still reading, so there is no "before" number. Ours read the 524k-token document in 30 minutes, found the hidden fact, and peaked at 35.3 GiB of GPU memory.
 
-The longer the prompt, the bigger the gain. At 32k–262k the model found a fact hidden in the middle of the document in every run, before and after.
+The longer the prompt, the bigger the gain. At 32k–524k the model found a fact hidden in the middle of the document in every run, before and after.
 Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Follow-up questions in 1.5 s
@@ -71,7 +72,7 @@ mlx 0.32.4. For fast follow-ups, start the server with the prefix cache on (`APC
 
 ## Quality
 
-Bit-identical outputs: at 4k, 32k and 131k the patched build produces the same tokens and the same per-token
+Bit-identical outputs: at 4k, 32k, 131k and 262k the patched build produces the same tokens and the same per-token
 log-probabilities, bit for bit, as the same code without our patches (the community fork we build on). No quantized KV cache, no sparse or approximate
 attention: this is the full bf16 model, just faster.
 
