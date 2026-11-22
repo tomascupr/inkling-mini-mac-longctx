@@ -19,7 +19,7 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 32k (32,750) | **865.3** | **47.23** | **20.34** | 667.9 / 27.0 / 28.27 | 1.30× / 1.75× | bit-identical to unpatched code |
 | 131k (131,054) | **624.3** | **35.80** | **23.34** | 401.9 / 16.2 / 33.58 | 1.55× / 2.21× | bit-identical to unpatched code |
 | 262k (262,126) | **453.6** | **27.01** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.52× | bit-identical to unpatched code |
-| 524k (524,270) | **292.6** | **17.86** | **35.35** | not measured (stopped after 14 min, still reading) | – | needle found (no 524k unpatched reference run) |
+| 524k (524,270) | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
 
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
 *without* a draft model. The standard build can already use Inkling's DSpark draft head: on the same Mac, 4k prompt,

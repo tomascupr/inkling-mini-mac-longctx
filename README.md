@@ -18,7 +18,7 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 | 262k tokens | 256.4 → **453.6** | 10.7 → **27.0** | 1.77× / 2.52× |
 | 524k tokens | not measured* → **292.6** | not measured* → **17.9** | – |
 
-\* Our 524k run on the standard build was stopped after 14 minutes, still reading, so there is no "before" number. Ours read the 524k-token document in 30 minutes, found the hidden fact, and peaked at 35.3 GiB of GPU memory.
+\* We have no 524k run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes, found the hidden fact, and peaked at 35.3 GiB of GPU memory.
 
 The longer the prompt, the bigger the gain. At 32k–524k the model found a fact hidden in the middle of the document in every run, before and after.
 Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
