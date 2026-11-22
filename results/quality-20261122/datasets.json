@@ -1,0 +1,5 @@
+{
+ "gsm8k": "openai/gsm8k@740312add88f781978c0658806c59bc2815b9866 (main/test)",
+ "mmlu_pro": "TIGER-Lab/MMLU-Pro@b189ec765aa7ed75c8acfea42df31fdae71f97be (test)",
+ "ruler_niah_32k": "SaylorTwift/RULER-32768-llama-3.2-tokenizer@e748e0cd1872b4bbaa6d5ed9c6fbcf6068951c42 (niah_single_1/2/3)"
+}

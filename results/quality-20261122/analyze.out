@@ -1,0 +1,43 @@
+gsm8k: n=100 stock 97/100 97.0% [91.5%,99.0%] | stack4 99/100 99.0% [94.6%,99.8%] | paired {'both_right': 97, 'both_wrong': 1, 'stock_only': 0, 'stack4_only': 2, 'mcnemar_p': 0.5} | agree {'items_token_identical': 23, 'items': 100, 'token_agreement_prefix_rate': 0.3399940939068806, 'same_answer_and_score': 97, 'first_divergence_median': 67, 'first_divergence_min': 2}
+   truncated: stock 0  stack4 0
+   errors: stock 0  stack4 0
+   no_parse: stock 0  stack4 0
+   prompt_tokens_mean: stock 107.58  stack4 107.58
+   gen_tokens_mean: stock 285.16  stack4 286.95
+   ttft_s_median: stock 0.284776687505655  stack4 0.26378547900822014
+   prefill_tps_median: stock 354.3489021805033  stack4 386.4866884711023
+   decode_tps_median: stock 37.08464141297535  stack4 42.93586987056652
+   decode_tps_min: stock 34.98697674288369  stack4 42.148379436043804
+   peak_mlx_GiB_max: stock 20.28426481410861  stack4 18.525865700095892
+   wall_s: stock 802.6892339214683  stack4 697.9527497072704
+   gpu_util_mean_during: stock 0.9966017150259637  stack4 0.980931573305557
+   gpu_power_W_mean_during: stock 17.664527791506284  stack4 14.177560258267532
+mmlu_pro: n=140 stock 110/140 78.6% [71.1%,84.6%] | stack4 109/140 77.9% [70.3%,83.9%] | paired {'both_right': 103, 'both_wrong': 24, 'stock_only': 7, 'stack4_only': 6, 'mcnemar_p': 1.0} | agree {'items_token_identical': 11, 'items': 140, 'token_agreement_prefix_rate': 0.11144677516439336, 'same_answer_and_score': 117, 'first_divergence_median': 40, 'first_divergence_min': 4}
+   truncated: stock 11  stack4 8
+   errors: stock 0  stack4 0
+   no_parse: stock 10  stack4 7
+   prompt_tokens_mean: stock 218.50714285714287  stack4 218.50714285714287
+   gen_tokens_mean: stock 577.2428571428571  stack4 543.5214285714286
+   ttft_s_median: stock 0.3581302914535627  stack4 0.33782483299728483
+   prefill_tps_median: stock 534.615398238293  stack4 565.0651448837788
+   decode_tps_median: stock 36.12725065624221  stack4 42.526609157023984
+   decode_tps_min: stock 33.541869630655064  stack4 41.57693293786821
+   peak_mlx_GiB_max: stock 21.329552114009857  stack4 18.826769769191742
+   wall_s: stock 2370.334748132387  stack4 1850.5834869497921
+   gpu_util_mean_during: stock 0.9961725393464046  stack4 0.9826105499791132
+   gpu_power_W_mean_during: stock 18.192890568441584  stack4 13.959330991581753
+ruler_niah_32k: n=12 stock 12/12 100.0% [75.7%,100.0%] | stack4 12/12 100.0% [75.7%,100.0%] | paired {'both_right': 12, 'both_wrong': 0, 'stock_only': 0, 'stack4_only': 0, 'mcnemar_p': 1.0} | agree {'items_token_identical': 4, 'items': 12, 'token_agreement_prefix_rate': 0.4650112866817156, 'same_answer_and_score': 12, 'first_divergence_median': 39.5, 'first_divergence_min': 5}
+   truncated: stock 0  stack4 0
+   errors: stock 0  stack4 0
+   no_parse: stock None  stack4 None
+   prompt_tokens_mean: stock 34407.166666666664  stack4 34407.166666666664
+   gen_tokens_mean: stock 140.83333333333334  stack4 133.33333333333334
+   ttft_s_median: stock 53.45697639603168  stack4 40.12772054201923
+   prefill_tps_median: stock 649.0471956607483  stack4 864.7872199181775
+   decode_tps_median: stock 26.476091027218494  stack4 47.268235613357334
+   decode_tps_min: stock 26.32396311905801  stack4 47.00117769722193
+   peak_mlx_GiB_max: stock 32.67277108319104  stack4 20.514225643128157
+   wall_s: stock 698.6325788747054  stack4 510.7539656669833
+   gpu_util_mean_during: stock 0.9849961579024971  stack4 0.997915835409868
+   gpu_power_W_mean_during: stock 50.73859640929076  stack4 54.94792173729568
+{'samples': 3332, 'interval_ms': 2000, 'gpu_util_mean': 0.9883310792689286, 'gpu_util_p50': 0.9942328333854675, 'frac_samples_gpu_lt_50pct': 0.0027010804321728693, 'gpu_power_W_mean': 22.510539669087347, 'gpu_power_W_max': 81.68948364257812, 'sys_power_W_mean': 82.9642836231859, 'ram_used_GiB_max': 46.85203552246094, 'swap_used_GiB_max': 0.00885009765625, 'gpu_temp_max': 84.1194839477539, 'max_sample_gap_s': 2.098551034927368}

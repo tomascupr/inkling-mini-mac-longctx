@@ -1,0 +1,16 @@
+{
+ "type": "meta",
+ "build": "stack4",
+ "mlx_vlm_version": "0.8.0+inkling2mini.1",
+ "mlx_vlm_file": "~/exact-work/stack4/ov/mlx_vlm/__init__.py",
+ "mlx": "0.32.4",
+ "reasoning_effort": "low",
+ "prefill_step_size": 2048,
+ "temperature": 0.0,
+ "env": {
+  "MLX_VLM_EXACT_PREFILL_EVAL_EVERY": "1",
+  "MLX_MAX_MB_PER_BUFFER": "2"
+ },
+ "load_s": 2.2182989998254925,
+ "active_after_load_GiB": 18.185636527836323
+}

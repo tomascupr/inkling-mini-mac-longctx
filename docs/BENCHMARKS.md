@@ -175,3 +175,66 @@ gated bit-identical.
 ## Repo hygiene
 Result files had local usernames in paths replaced with `~`; machine-specific fields
 (process lists, network details) were removed from the run JSONs. Numbers are unchanged.
+
+## Standard quality benchmarks
+
+Run 2026-11-22 08:59–11:09 CET on Studio 1 under the GPU lock (nothing else on the GPU). Script, sample IDs, raw
+per-item JSONL (tokens, text, timings), telemetry and summary: `results/quality-20261122/`.
+
+**Builds.** *Standard* = inkling2-mlx v0.2.0 (MLX-VLM `0.8.0+inkling2mini.2`). *This repo* = the `stack4` build
+(the one behind the README table: fork + 0001 + 0002 + 0003), recommended env (`MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1
+MLX_MAX_MB_PER_BUFFER=2`). *Fork control* (GSM8K only) = the community fork with our exact memory patch 0001.
+Same weights (rev `ed40e7da`), same chat template (`apply_chat_template`, `reasoning_effort="low"`), greedy
+(temperature 0), prefill step 2048, batch 1, one request at a time via `stream_generate`.
+
+**Data** (public HF datasets, pinned revisions in `datasets.json`; prompts built by `prep.py`, sha256 of the prompt
+file `0fc9d478…`):
+- GSM8K `openai/gsm8k@740312ad` test, first 100. Prompt asks for `Final answer: <number>`; exact numeric match. max 2048 tokens.
+- MMLU-Pro `TIGER-Lab/MMLU-Pro@b189ec76` test, 10 per category × 14 (seed 0). Last `Answer: <letter>`. max 2048 tokens.
+- RULER `SaylorTwift/RULER-32768-llama-3.2-tokenizer@e748e0cd`, niah_single_1/2/3, 4 each (cut from 20 to 12 for
+  wall time). ~34.4k Inkling tokens each. Correct if every gold string is in the final answer. max 512 tokens.
+
+| Benchmark | n | Standard build | This repo | Paired (std only / repo only) | Token-identical items | Truncated (std / repo) |
+|---|---:|---:|---:|---|---:|---|
+| GSM8K | 100 | 97 (97.0%, 95% CI 91.5–99.0) | **99** (99.0%, 94.6–99.8) | 0 / 2, McNemar p = 0.50 | 23 / 100 | 0 / 0 |
+| MMLU-Pro | 140 | 110 (78.6%, 71.1–84.6) | 109 (77.9%, 70.3–83.9) | 7 / 6, p = 1.00 | 11 / 140 | 11 / 8 |
+| RULER NIAH 32k | 12 | 12 (100%, 75.7–100) | 12 (100%, 75.7–100) | 0 / 0 | 4 / 12 | 0 / 0 |
+
+CIs are Wilson 95%. Neither difference is significant; the samples are small (a 1-item swing on GSM8K is 1 point).
+
+**Why tokens differ from the standard build.** The standard build is different code (a different MLX-VLM build), so
+greedy decoding drifts apart by rounding at the first near-tie: first divergence at median token 67 (GSM8K) / 40
+(MMLU-Pro), as early as token 2. After that the two builds write different but equally valid text (97/100 GSM8K
+items still get the same answer and score). **Against the community fork (our base), this repo was token-for-token
+identical on all 100 GSM8K items** (fork control, 99/100 correct, same as ours), which is the bit-exactness claim.
+
+**MMLU-Pro truncation caveat.** With low reasoning effort the model sometimes keeps reasoning past 2048 tokens
+(11 standard / 8 repo; engineering 6 / 2 and law 2 / 2 are the most common). Truncated items mostly have no parseable
+answer and count as wrong for both builds: 10 / 7 unparsed.
+
+**Speed in the same run** (medians per request, `stream_generate`'s own counters):
+
+| | GSM8K (~108-token prompts) | MMLU-Pro (~219) | RULER 32k (~34.4k) |
+|---|---|---|---|
+| Reading, tok/s (std → repo) | 354 → 386 | 535 → 565 | 649 → **865** |
+| Writing, tok/s | 37.1 → 42.9 | 36.1 → 42.5 | 26.5 → **47.3** |
+| Time to first token | 0.28 → 0.26 s | 0.36 → 0.34 s | 53.5 → 40.1 s |
+| Peak MLX memory | 20.3 → 18.5 GiB | 21.3 → 18.8 GiB | 32.7 → 20.5 GiB |
+| Wall time (all items) | 803 → 698 s | 2,370 → 1,851 s | 699 → 511 s |
+
+No errors, no stalls (largest gap between consecutive telemetry samples 2.1 s at a 2 s interval; no gaps between
+requests), no swap use. GPU telemetry from `macmon` (no sudo), every 2 s: GPU busy ~98–99% throughout; GPU power
+~14–18 W while writing short answers vs ~51–55 W while reading 32k prompts; max GPU temperature 84 °C.
+
+**Improvement leads seen in this run** (ranked):
+1. *Short-prompt writing is slower than 32k writing.* This repo writes 42.5–43.0 tok/s after 100–200-token prompts
+   but 47.3 tok/s after 34k-token prompts (and 50.6 at 4k in `exact_check`). The rate doesn't depend on answer
+   length (42.1 for answers over 1,000 tokens), so it isn't warm-up. The likely cause is a different decode path when
+   the global KV is short (the split-K decode attention is used from S >= 4096). Worth up to ~+15% on chat-style use.
+2. *Writing is latency-bound, not bandwidth-bound.* "GPU busy 98%" at only ~14 W while writing (vs ~55 W reading)
+   means the GPU waits on many small dependent kernels: the same gap as the 58–66%-of-bandwidth decode numbers.
+   Fewer, fused kernels per token (the decode track's work) is the lever.
+3. *Short-prompt reading is overhead-bound*: 386 tok/s at ~108 tokens vs 865 at 32k; time to first token is ~0.26 s
+   either way, so it barely matters for chat.
+4. *MMLU-Pro truncations* are a model/effort setting, not a speed issue: medium effort or a larger token budget
+   would remove most of them in a future run.

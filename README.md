@@ -77,6 +77,13 @@ Bit-identical outputs: at 4k, 32k, 131k and 262k the patched build produces the 
 log-probabilities, bit for bit, as the same code without our patches (the community fork we build on). No quantized KV cache, no sparse or approximate
 attention: this is the full bf16 model, just faster.
 
+Standard benchmarks (greedy, same prompts, 2026-11-22): **GSM8K** (first 100) 97% standard build vs **99%** this repo;
+**MMLU-Pro** (140, 10 per subject) 78.6% vs **77.9%**; **RULER needle-in-a-haystack at 32k** (12) 12/12 both. The paired
+differences are within noise (2 and 13 items differ; McNemar p = 0.5 and 1.0). This repo's output was token-for-token identical
+to the community fork on all 100 GSM8K items; it differs from the standard build's wording by design (different
+code), not in accuracy. Same run: 1.3× faster reading and 1.8× faster writing on the 32k items. Details:
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md#standard-quality-benchmarks).
+
 ## What's next
 
 - **1M tokens on one Mac:** measured (above). Next: speculative decoding and the prefix cache at 1M.
