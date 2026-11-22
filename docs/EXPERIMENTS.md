@@ -216,3 +216,14 @@ with a draft model, the same tokens as without it.
 - **Server reading sweep (Studio 1, stack17, warm run):** step 2048: 1064.0 / 938.7; step 4096: 1043.4 / 921.1;
   without `MLX_MAX_MB_PER_BUFFER=2`: 1034.8 / 920.9 (2048), 995.8 / 901.0 (4096); 4096 + `EVAL_EVERY=0`: 1033.8 /
   935.2. Keep the defaults (2048, MB 2, eval every chunk).
+- **MLX-Serve re-run on Studio 2, same session (19:52, same binary and script, draft on, warm-up + 3 runs):** reading
+  1042.1 / 1038.8 / 1034.2 (4k), 898.8 / 898.3 / 897.6 (32k); writing 75.3 / 76.2 / 77.2 (4k, 122 tokens),
+  70.6 / 72.2 / 71.5 (32k, 125 tokens). Its published 15:08 numbers (1012.4 / 877.3 / 66.1 / 74.8) were single runs;
+  today it reads ~2.5% faster and writes 4k faster, 32k slower. `results/h2h-20261122/mlxserve-rerun-1952-draft-on.log`.
+- **Ours right after it (g17b, stack17 = 0017, env.sh defaults):** reading 983.3 / 984.2, 865.1 / 866.2; writing
+  79.4 / 80.1 (4k), 74.9 / 74.8 (32k). Same session: writing wins both rows (+5% / +5%), reading is −5% / −4%.
+- tau sweep (Studio 1 server, stack17): 0.35: 76.2 / 73.5 (drafted 143 / 133 for 98 / 101 accepted); 0.5: 82.4 /
+  78.8; 0.65 (default): 83.4–86.1 / 78.1–80.6. Rounds stay 25–26: the cut only trims wasted drafts. 0.8: lost to a
+  bench-script bug (an overwritten running script left a stale server on the port; its requests hit the 0.5 server).
+  Fixed with versioned scripts and a random port per run.
+- Draft-head prefill cost (Studio 1 server, step 4096, no MB): draft off 1044.2 / 941.3 vs on 1033.8 / 935.2 (−1.0% / −0.6%).
