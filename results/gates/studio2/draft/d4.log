@@ -1,0 +1,13 @@
+17:53:58 ctx 4096 k 0 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+d4-4096-k0 dtps 54.78 ptps 987.9 needle True acc None rounds None misses 0 ntok 123 
+d4-4096-k0 dtps 55.57 ptps 1017.8 needle True acc None rounds None misses 0 ntok 123 
+17:54:16 ctx 4096 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+d4-4096-k8 dtps 69.13 ptps 999.7 needle True acc 0.8032786885245902 rounds 26 misses 0 ntok 123 
+d4-4096-k8 dtps 74.08 ptps 1019.1 needle True acc 0.8032786885245902 rounds 26 misses 0 ntok 123 
+17:54:33 ctx 32768 k 0 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+d4-32768-k0 dtps 48.72 ptps 885.5 needle True acc None rounds None misses 0 ntok 126 
+d4-32768-k0 dtps 48.98 ptps 887.4 needle True acc None rounds None misses 0 ntok 126 
+17:55:57 ctx 32768 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+d4-32768-k8 dtps 66.96 ptps 880.3 needle True acc 0.8782608695652174 rounds 25 misses 0 ntok 126 
+d4-32768-k8 dtps 71.25 ptps 879.7 needle True acc 0.8782608695652174 rounds 25 misses 0 ntok 126 
+DSDONE

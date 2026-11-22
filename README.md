@@ -22,7 +22,7 @@ Measured on one M4 Max 64 GB (our second test Mac; MLX-Serve's own server-log nu
 | Writing, 32k, no draft | 50.2 | 48.9 | on par (−3%) |
 | Writing, 4k, no draft | 56.4 | 55.1–55.9 | on par (−1 to −2%) |
 | Writing, 4k, draft head (default) | 66.1 | **74.1** (block 8; 74.8–76.3 at block 5) | **fastest** |
-| Writing, 32k, draft head (default) | 74.8 | 72.3 | on par (−3%), in progress |
+| Writing, 32k, draft head (default) | 74.8 | 71.3–72.3 | on par (−3 to −5%), in progress |
 
 Reading rows: prefill step 4096 (the reference fork's own chunking option, which passes our quality gate); at step
 2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head (on by
@@ -69,7 +69,7 @@ unlikely one instead of paying for guesses that would be thrown away (block 8, c
 | Writing speed (tok/s, second test Mac) | 4k prompt | 32k prompt | 131k prompt |
 |---|---:|---:|---:|
 | This repo, no draft | 55.6 | 48.9 | 36.4 |
-| **This repo, default (draft head)** | **74.1** | **72.3** | **50.4** |
+| **This repo, default (draft head)** | **74.1** | **71.3–72.3** | **50.4** |
 
 Every draft run gave exactly the no-draft tokens and found the hidden fact (131k: single cold run). The draft head
 switches itself off for contexts under 1,024 tokens (the exact check can't run there yet, so drafting would be
