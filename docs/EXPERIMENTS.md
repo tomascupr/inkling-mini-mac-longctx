@@ -349,3 +349,15 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   First ahead on all four server rows, but the 4k lead is small.
 - MoE softcapped SwiGLU as one Metal kernel (S1 microbench, 32616 x 1152): compiled MLX 1.40 ms; variants with
   precise or fast exp/tanh 0.67–1.18 ms but none bitwise (17k–21k of 37.6M elements differ). Testing more variants.
+- MoE softcapped SwiGLU kernel with MLX's exact Sigmoid (`1 / (1 + precise::exp(|x|))`, `x < 0 ? y : 1 - y`),
+  precise tanh, no FMA, safe math: bitwise, 1.59–1.78 -> 0.86–0.88 ms in the microbench. Server A/B on S1 (stack30 vs
+  stack28, interleaved): 4k 1126.3 / 1125.5 vs 1126.4 / 1127.0, 32k 1001.1 / 1001.2 vs 1002.8 / 1002.6. No gain in
+  the server. FAIL; not kept.
+- **S2 same session h30 (22:42–22:50 CET), MLX-Serve then ours:** reading 4k MLX-Serve 1037.0 / 1034.2 / 1042.1 (mean
+  1037.8) vs ours 1042.0 / 1036.3 (mean 1039.2, +0.1%); 32k 898.9 / 899.0 / 898.4 vs 926.7 / 927.3 / 928.5 (+3.2%).
+  Writing 4k 75.6–76.8 vs 80.2 / 81.1; 32k 70.9–72.0 vs 75.4 / 76.6. Needle 18/18. Pooled over h29 + h30, 4k reading
+  is 1039.9 vs 1036.1 (+0.4%): level, not a clear lead.
+- The first 32k request in each of our server sessions writes at 68.6–70.2 tok/s, then 75–77. That is the
+  harness's warm-up run for that context, and the first 4k request shows the same dip (69–70 vs 80). This points to
+  first-use cost at the new context length (kernel JIT for new shapes or KV/buffer growth), not steady-state decode.
+  Not investigated further tonight.
