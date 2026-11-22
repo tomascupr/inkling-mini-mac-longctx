@@ -227,3 +227,21 @@ with a draft model, the same tokens as without it.
   bench-script bug (an overwritten running script left a stale server on the port; its requests hit the 0.5 server).
   Fixed with versioned scripts and a random port per run.
 - Draft-head prefill cost (Studio 1 server, step 4096, no MB): draft off 1044.2 / 941.3 vs on 1033.8 / 935.2 (−1.0% / −0.6%).
+
+### 2026-11-22 20:00– CET: fast prototyping (Tomas 20:11: single-shot server runs, gate at the end)
+
+One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio 2.
+- Opus #5 env parity (S1, stack18): `EVAL_EVERY=0` at step 2048: reading 1053.6 / 931.3 vs 1064.2 / 939.4 (worse);
+  also without `MB=2`: 1036 / 922 (worse); step 4096 + `EVAL_EVERY=0`: 1042 / 925.5 (worse). env.sh stays. FAIL.
+- Opus #2a `MLX_VLM_BATCH_CACHE_EVAL_INTERVAL=0` (no cache clear inside the answer), S1: 32k writing 80.5 -> 81.2,
+  4k 86.5 -> 86.9. Small WIN, kept.
+- No 1 GiB cache limit + no per-chunk `clear_cache` in server prefill (S1, with `EVAL_EVERY=0`): 1062.8 / 940.3, i.e.
+  recovers what `EVAL_EVERY=0` lost, no gain over defaults. Re-testing with defaults.
+- Opus #2b + #1 bucket: build the draft candidate list during prefill (async), JSON parsed once, size bucket 4096
+  (S1 f1): 4k 87.4, 32k 81.8 (from 86.9 / 81.2); S2 g21a: 81.8 / 75.5 (from 80.1 / 74.8). Small WIN, kept.
+- Message-gate tail casts inside the compiled kernel (`PF_MGC`): microbench bitwise equal at 36–4,096 rows,
+  0.40 -> 0.30 ms per gate at 2,048 rows; S2 server with lean prefill: 983.4 / 868.3 vs 978.2 / 865.5. Small WIN.
+- Opus #4 lean draft prefill (only the global draft layer per chunk, async; sliding layers once from the last 1,024
+  rows): S1 1064.1 / 941.5 vs 1061.6 / 939.3, tokens and acceptance unchanged. Small WIN.
+- Fused gate+up expert GEMM (one `gather_qmm`, N = 2,304; the checkpoint's w13 shares one global scale): S1 1062.3 /
+  940.2 vs 1063.2 / 941.7, same answers. No gain (the expert GEMM is compute-bound; N doesn't help). FAIL, off.
