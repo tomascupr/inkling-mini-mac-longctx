@@ -1,0 +1,13 @@
+mlxserve start 23:10:04
+RERUN_DONE
+mlxserve log /Users/tomascupr/.exo-inkling-bench/mlxserve/logs/serve-rerun-2310-draft-on.log
+  <- 4078+16 tokens streamed [prefill: 1102.0 tok/s, decode: 111.6 tok/s] [length]
+  <- 131054+125 tokens streamed [prefill: 674.0 tok/s, decode: 45.0 tok/s] [stop]
+  <- 131054+125 tokens streamed [prefill: 674.0 tok/s, decode: 51.7 tok/s] [stop]
+  <- 131054+125 tokens streamed [prefill: 673.9 tok/s, decode: 51.6 tok/s] [stop]
+== ours h31 23:29:39
+LOG prompt_tokens=131054 generated_tokens=133 elapsed=192.817s prefill=703.5 tok/s decode=52.3 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=131054 generated_tokens=133 elapsed=188.138s prefill=706.2 tok/s decode=56.6 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=131054 generated_tokens=133 elapsed=188.142s prefill=706.2 tok/s decode=56.7 tok/s finish_reason=stop in_flight=0
+  9 VIOLET-ANCHOR-4729
+H2H31DONE

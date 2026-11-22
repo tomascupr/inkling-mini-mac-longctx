@@ -1,0 +1,8 @@
+h31 131072 0 {'prompt_tokens': 131054, 'completion_tokens': 133, 'prompt_tps': 688.255356169886, 'decode_tps': 55.07961004453797, 'needle_found': True, 'error': None}
+LOG prompt_tokens=131054 generated_tokens=133 elapsed=192.817s prefill=703.5 tok/s decode=52.3 tok/s finish_reason=stop in_flight=0
+h31 131072 1 {'prompt_tokens': 131054, 'completion_tokens': 133, 'prompt_tps': 705.0631397398754, 'decode_tps': 58.532554735494436, 'needle_found': True, 'error': None}
+LOG prompt_tokens=131054 generated_tokens=133 elapsed=188.138s prefill=706.2 tok/s decode=56.6 tok/s finish_reason=stop in_flight=0
+h31 131072 2 {'prompt_tokens': 131054, 'completion_tokens': 133, 'prompt_tps': 705.0528247577397, 'decode_tps': 58.5350632086809, 'needle_found': True, 'error': None}
+LOG prompt_tokens=131054 generated_tokens=133 elapsed=188.142s prefill=706.2 tok/s decode=56.7 tok/s finish_reason=stop in_flight=0
+../stack16/srv3.sh: line 24: 98067 Terminated: 15          $PY -u -c "$START" --host 127.0.0.1 --port $PORT --model-dir $M --prefill-step-size ${STEP:-2048} --max-num-seqs 1 --max-tokens 8192 --log-level INFO >> $LOG 2>&1
+SRVDONE
