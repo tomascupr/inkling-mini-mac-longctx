@@ -6,6 +6,18 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **17:25–17:55 — draft-confidence verify cut (patch 0012) and draft head on by default.** The draft head returns
+  each proposal's softmax probability; the round verifies only up to the first position where the cumulative
+  probability drops below τ (exact verifier, so tokens are unchanged). Studio 2, 32k, block 8: τ 0.3 66.9 / 0.5
+  **72.3** / 0.6 72.6–70.9 / 0.7 71.6 (no cut 59.4; k5 67.7). The cut needs a CPU read of the draft before the verify
+  graph is built: τ = 0.0001 (sync, never cuts) costs 5% (56.6 vs 59.4). Pre-building the verify for the likeliest
+  cut while the GPU drafts (the exact verifier is pure until commit) did not help (71.5). Also tried: minimum 2
+  rows (70.8), draft context window 8k (acceptance drops, 56.9). Studio 1 (same sweep, own numbers): τ 0.4 73.0 /
+  0.45 75.3 / 0.5 77.3 at block 8; k6/k7 ceilings 67.4–73.0. Defaults (Studio 2): 4k 74.1 vs 55.6 no draft, 131k
+  50.4 vs 36.4, 2048 75.8 vs 55.7; 600-token prompt 33.9 vs 42.0 (exact verifier can't serve <1,024 keys) → draft
+  off below 1,024 and above 262,144 context tokens (`MLX_VLM_INKLING2_DRAFT_{MIN,MAX}_CTX`). Draft adds 1.1 GiB peak.
+  All runs: tokens identical to the no-draft run. 0007 rebased onto 0008–0011 (one hunk); 0013 = prefix cache
+  (0004+0006) on top of 0007 (one overlapping hunk resolved; not measured end to end).
 - **17:15–17:30 — 0010 was not bit-identical on short chunks; fixed (shape gate).** The 8-prompt quality set
   (greedy 64 tokens + teacher-forced top-1, prompts of 36–14,692 tokens, step 2048) showed stack13 + 0010 at 4/8
   greedy-identical and 99.04% teacher-forced top-1, while the same tree without `PREFILL_FUSED` was 8/8 / 100%

@@ -37,10 +37,10 @@ draft). Ours: `MLX_VLM_INKLING2_PREFILL_FUSED=1` (patch 0010), `scripts/exact_ch
 | Writing 4k, no draft | 56.4 | 52.6 | 52.9; **55.1–55.9** with `DECODE_MIN_KEYS=1024` (0011) |
 | Writing 32k, no draft | 50.2 | 48.6 | 48.9 |
 | Writing 4k, draft | 66.1 (block 8) | | 62.6 (block 5); **74.8–76.3** with 0011 (k6 66.5, k8 62.0) |
-| Writing 32k, draft | 74.8 (block 8) | | 67.7 (block 5; k4 64.6, k8 59.4) |
+| Writing 32k, draft | 74.8 (block 8) | | **72.3** (default: block 8 + confidence cut 0.5; was 67.7 at block 5, 59.4 at block 8) |
 
 Step 2048 rows: tokens and logprob sha equal to the unpatched fork, needle found (`results/gates/studio2/p10b-*.json`).
-Draft rows: patch 0007 (exact DSpark verify) + 0010, tokens identical to the no-draft run, `results/gates/studio2/draft/`.
+Draft rows: patch 0007 (exact DSpark verify) + 0010 (+ 0012 confidence cut for the default rows), tokens identical to the no-draft run, `results/gates/studio2/draft/` (`cf*`, `d4-*`, `l131-*`, `sh-*`). Default config at 4k: 74.1 (block 8, cut 0.5) vs 55.6 no draft; 131k: 50.4 vs 36.4 (single cold runs, stack without 0008/0009).
 0011 rows: tokens identical to the unpatched fork (4k needle run) and on the fixed 8-prompt set (greedy 8/8, teacher-forced top-1 100% with step 2048; `results/gates/studio2/top1/top1-mk1024.*` vs `top1-s13gate.*`). Still behind MLX-Serve on no-draft writing and on drafted writing at 32k; work in progress.
 Step 4096 changes only the prefill chunking (fork vs itself at step 4096: teacher-forced top-1 99.6% on the fixed
 8-prompt set, needle answers identical); the fused kernels are bit-identical on top of it (since 17:30 also on short chunks: 8/8 greedy, 100% teacher-forced top-1 at step 2048, `top1-s13gate.*`).

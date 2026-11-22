@@ -21,13 +21,14 @@ Measured on one M4 Max 64 GB (our second test Mac; MLX-Serve's own server-log nu
 | Reading, 32k prompt | 877 | **884–888** | **fastest** |
 | Writing, 32k, no draft | 50.2 | 48.9 | on par (−3%) |
 | Writing, 4k, no draft | 56.4 | 55.1–55.9 | on par (−1 to −2%) |
-| Writing, 4k, draft head | 66.1 | **74.8–76.3** | **fastest** |
-| Writing, 32k, draft head | 74.8 | 67.7 | behind (−9%), in progress |
+| Writing, 4k, draft head (default) | 66.1 | **74.1** (block 8; 74.8–76.3 at block 5) | **fastest** |
+| Writing, 32k, draft head (default) | 74.8 | 72.3 | on par (−3%), in progress |
 
 Reading rows: prefill step 4096 (the reference fork's own chunking option, which passes our quality gate); at step
-2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head gives
-the same tokens as writing without it. The 4k writing rows use opt-in `MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024` (patch
-0011: on the fixed 8-prompt quality set its answers are identical to the reference fork's, 8/8; log-probabilities are not bit-identical). Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
+2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head (on by
+default) gives the same tokens as writing without it. Writing rows use `MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024` (patch
+0011, on by default: on the fixed 8-prompt quality set its answers are identical to the reference fork's, 8/8;
+log-probabilities are not bit-identical). Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
 
 ### Before → after (standard build → this repo)
 
@@ -55,25 +56,25 @@ Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 Ask about a 131k-token document once: reading it takes about 3.6 minutes. Ask a follow-up, and the answer starts
 in **1.5 s** (1.46–1.54 s measured), because the Mac keeps the document's processed state instead of reading it again.
 
-## Optional: speculative decoding, much faster writing, still bit-identical
+## Speculative decoding, on by default: faster writing, same tokens
 
 Inkling-2-Mini ships a small draft head (DSpark) that guesses several words ahead; the big model then checks
 all the guesses in one pass. Usually that check is computed differently from normal one-word-at-a-time writing, so
 the result is "the same words, almost always" (rounding can flip a near-tie). **Our check computes every guessed
 position with exactly the same GPU arithmetic as normal writing** (same kernels, same order of additions, each
-weight and each block of the document's memory read once for all guesses), so the output is **bit-for-bit the
-same as writing without the draft**: same tokens and the same per-token log-probabilities. Install with
-`EXACT_DSPARK=1` (patch `0007`):
+weight and each block of the document's memory read once for all guesses), so the output is **the same tokens as
+writing without the draft**. The draft also reports how sure it is of each guess, and the check stops at the first
+unlikely one instead of paying for guesses that would be thrown away (block 8, cut at 50% cumulative confidence).
 
-| Writing speed (tok/s) | 32k prompt | 131k prompt | 262k prompt |
+| Writing speed (tok/s, second test Mac) | 4k prompt | 32k prompt | 131k prompt |
 |---|---:|---:|---:|
-| Standard build, no draft | 27.0 | 16.2 | 10.7 |
-| This repo, no draft | 53.7 | 40.2 | 29.8 |
-| **This repo + draft head (block 4), bit-identical** | **66.0** | **52.7** | **35.7** |
+| This repo, no draft | 55.6 | 48.9 | 36.4 |
+| **This repo, default (draft head)** | **74.1** | **72.3** | **50.4** |
 
-Each draft run matched the unpatched code's no-draft output exactly (tokens and log-probability sha256) and found
-the hidden fact. The draft helps most on long documents, where every written word otherwise re-reads the whole
-document's memory. Env and details: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+Every draft run gave exactly the no-draft tokens and found the hidden fact (131k: single cold run). The draft head
+switches itself off for contexts under 1,024 tokens (the exact check can't run there yet, so drafting would be
+slower: 33.9 vs 42.0 tok/s at 600 tokens) and over 262,144 tokens (not yet measured at 524k/1M, where memory is
+tight; it adds ~1.1 GiB). `NO_DRAFT=1` turns it off. Env and details: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## What we changed
 
@@ -97,13 +98,12 @@ git clone https://github.com/tomascupr/inkling-mini-mac-longctx && cd inkling-mi
 bash scripts/install.sh                     # PREFIX=1 also adds the prefix-cache patch
 hf download thinkingmachines/Inkling-2-Mini --local-dir ~/inkling-mini/models/Inkling-2-Mini
 
-export PYTHONPATH=~/inkling-mini/src/stacked
-export MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2
-export MLX_VLM_INKLING2_PREFILL_FUSED=1      # bit-identical fused prefill kernels (patch 0010)
+source scripts/env.sh                       # default env: fused prefill, draft head on (NO_DRAFT=1 for off)
 ```
 
-`install.sh` downloads the base code as a zip, applies `patches/stacked.patch` and sets up a venv with
-mlx 0.32.4. For fast follow-ups, start the server with the prefix cache on (`APC_ENABLED=1`; see
+`install.sh` downloads the base code as a zip, applies `patches/stacked.patch` and our patches (draft head
+included; `NO_DRAFT=1` skips it) and sets up a venv with mlx 0.32.4. The server picks the draft head up from
+`MLX_VLM_DRAFT_MODEL` (set by `scripts/env.sh`). For fast follow-ups, start the server with the prefix cache on (`APC_ENABLED=1`; see
 `scripts/prefix_cache.sh`). Check your own build with `scripts/gate.sh`.
 
 ## Quality
@@ -114,8 +114,9 @@ mlx 0.32.4. For fast follow-ups, start the server with the prefix cache on (`APC
   tokens and the same per-token log-probabilities, sha256) at 4k, 32k, 131k and 262k; at 1M the hidden fact is found and
   outputs match our earlier 1M run bit for bit. The new prefill kernels (attention residuals, message gates, MoE
   combine) reproduce MLX's own arithmetic order, so they are bit-identical too.
-- **Opt-in options** that are not bit-identical (prefill step 4096, older approximate fusion kernels) must pass our
-  gate: needle found at 32k/131k/1M, the same greedy answers, ≥99% top-1 token agreement with the fork on a fixed prompt
+- **The draft head** (on by default) gives exactly the tokens of writing without it. **Not bit-identical, gated:**
+  0011's decode kernels below 4,096 keys (on by default; same answers, 8/8), prefill step 4096 and the older
+  approximate fusion kernels (opt-in). Each must pass our gate: needle found at 32k/131k/1M, the same greedy answers, ≥99% top-1 token agreement with the fork on a fixed prompt
   set (`scripts/quality/top1.py`).
 
 Standard benchmarks (greedy, same prompts, 2026-11-22): **GSM8K** (first 100) 97% standard build vs **99%** this repo;
@@ -128,7 +129,7 @@ code), not in accuracy. Same run: 1.3× faster reading and 1.8× faster writing 
 ## What's next
 
 - **1M tokens on one Mac:** measured (above). Next: speculative decoding and the prefix cache at 1M.
-- **Speculative decoding at 524k/1M** (synthetic tests: 1M about 11 → 17 tok/s, memory is tight) and combined with the prefix cache: not measured end to end yet.
+- **Draft head at 524k/1M** (synthetic tests: 1M about 11 → 17 tok/s, memory is tight; off above 262k for now), in the server's batched path and with the prefix cache: not measured end to end yet.
 - More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~66–78% of its memory bandwidth on decode (32k–262k).
 
 ## Credits
