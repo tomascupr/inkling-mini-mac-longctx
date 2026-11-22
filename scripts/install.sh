@@ -63,6 +63,9 @@ fi
 if [ "$DRAFT" = 1 ]; then
     # Server + draft head: a single request runs the exact-verify round loop (same tokens as no draft).
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0015-server-exact-draft.patch")
+    # Draft head proposes from a 16k candidate list (+ prompt ids) with a compiled Markov loop; same tokens.
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0016-draft-vocab-compiled-markov.patch")
+    cp "$HERE/../data/draft_vocab_order.json" stacked/mlx_vlm/speculative/drafters/inkling2_dspark/
 fi
 [ -x "$ROOT/venv/bin/python" ] || "$PYBIN" -m venv "$ROOT/venv"
 "$ROOT/venv/bin/pip" install --quiet --upgrade pip

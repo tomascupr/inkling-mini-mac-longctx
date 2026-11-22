@@ -1,0 +1,207 @@
+diff -ruN a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
+--- a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 19:05:54.968470275 +0100
++++ b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 19:06:10.580453962 +0100
+@@ -44,6 +44,29 @@
+ 
+ import os as _os
+ _CONF_ON = float(_os.environ.get("MLX_VLM_INKLING2_DRAFT_CONF", "0")) > 0
++# Greedy proposals of one row: the Markov-head loop as one compiled graph.
++_DRAFT_COMPILE = _os.environ.get("MLX_VLM_INKLING2_DRAFT_COMPILE", "0") == "1"
++# Candidate vocabulary for proposals: ids < N plus the prompt's ids (0 = full vocabulary).
++_DRAFT_VOCAB = int(_os.environ.get("MLX_VLM_INKLING2_DRAFT_VOCAB", "0"))
++_DT = _os.environ.get("MLX_VLM_INKLING2_DRAFT_TIMERS", "0") == "1"
++_DTACC = {}
++if _DT:
++    import atexit as _ae, json as _js, time as _tm
++
++    def _dt_dump():
++        with open("/tmp/draft-timers.json", "w") as f:
++            _js.dump({k: [v[0] * 1000 / max(v[1], 1), v[1]] for k, v in _DTACC.items()}, f)
++
++    _ae.register(_dt_dump)
++
++
++def _dt(name, t0):
++    import time
++    now = time.perf_counter()
++    a = _DTACC.setdefault(name, [0.0, 0])
++    a[0] += now - t0
++    a[1] += 1
++    return now
+ 
+ 
+ class DraftWindowCache(KVCache):
+@@ -336,9 +359,56 @@
+             for layer in self.layers
+         ]
+ 
++    def _build_vocab_subset(self):
++        import numpy as _np
++
++        vocab = self.config.unpadded_vocab_size
++        n = min(_DRAFT_VOCAB, vocab)
++        path = _os.environ.get("MLX_VLM_INKLING2_DRAFT_VOCAB_FILE", "") or _os.path.join(
++            _os.path.dirname(_os.path.abspath(__file__)), "draft_vocab_order.json"
++        )
++        if _os.path.exists(path):
++            # Candidate ids in priority order (scripts/draft_vocab.py): the model's own
++            # answer vocabulary on GSM8K/MMLU-Pro, then English Wikipedia by frequency.
++            import json as _json
++
++            with open(path) as f:
++                ids = _np.asarray(_json.load(f)[:n], dtype=_np.int64)
++            # Control/format tokens (ids above the text vocabulary).
++            ids = _np.union1d(ids, _np.arange(min(199998, vocab), vocab))
++        else:
++            ids = _np.arange(n, dtype=_np.int64)
++        prompt = self.__dict__.get("_lookup_prompt_ids")
++        if prompt is not None:
++            extra = _np.asarray(prompt.reshape(-1).tolist(), dtype=_np.int64)
++            ids = _np.union1d(ids, extra[(extra >= 0) & (extra < vocab)])
++        pad = (-len(ids)) % 256
++        if pad:
++            # Pad with the next ids above N (shape bucket for the compiled loop).
++            more = _np.setdiff1d(_np.arange(n, min(vocab, n + 4 * pad + 4096)), ids)[:pad]
++            ids = _np.union1d(ids, more)
++        idx = mx.array(ids.astype(_np.int32))
++        lm_head = self._target.lm_head
++        w = lm_head.weight[idx]
++        if isinstance(lm_head, nn.QuantizedLinear):
++            w = mx.dequantize(
++                w,
++                lm_head.scales[idx],
++                lm_head.biases[idx] if "biases" in lm_head else None,
++                group_size=lm_head.group_size,
++                bits=lm_head.bits,
++                mode=lm_head.mode,
++            )
++        mh = self.markov_head
++        sub = (idx, w.astype(mx.bfloat16), mh._fold_weight[idx], mh._fold_bias[idx])
++        mx.eval(*sub)
++        self.__dict__["_vsub"] = sub
++
+     def reset(self, target_model):
+         self.bind(target_model)
+         self.accept_lens, self.draft_lens = [], []
++        if _DRAFT_VOCAB > 0 and _DRAFT_COMPILE:
++            self._build_vocab_subset()
+         prepared = self.__dict__.pop("_prepared_target_cache", None)
+         if prepared is not None:
+             for cache in prepared:
+@@ -583,6 +653,9 @@
+             return mx.zeros((anchor.size, 0), token_dtype)
+         if self._target is None:
+             raise RuntimeError("Bind the target before drafting")
++        if _DT:
++            import time as _t
++            _t0 = _t.perf_counter()
+         embed = self._target.model.embed(anchor[:, None])
+         masks = mx.broadcast_to(
+             self.mask_embed.astype(embed.dtype),
+@@ -594,13 +667,45 @@
+             x, residual = layer(
+                 x, residual, self.mix(hidden, i, layer.dflare_norm), entry
+             )
++        if _DT:
++            _t0 = _dt("layers", _t0)
+         x = self.norm(x.astype(mx.float32) + residual.astype(mx.float32)).astype(
+             embed.dtype
+         )[:, 1 : count + 1]
+-        # Draft logits are BF16, unlike the target's FP32 vocabulary projection.
+-        base = self._target.lm_head(x).astype(x.dtype)
++        vsub = self.__dict__.get("_vsub") if anchor.size == 1 else None
++        if vsub is not None:
++            base = (x @ vsub[1].T).astype(x.dtype)
++        else:
++            # Draft logits are BF16, unlike the target's FP32 vocabulary projection.
++            base = self._target.lm_head(x).astype(x.dtype)
+         f_rnn = self.mix(hidden[:, -1:], -1, self.markov_head.dflare_norm)
+         context = self.markov_head.context(x, f_rnn)
++        if _DT:
++            _t0 = _dt("head", _t0)
++        if vsub is not None and _DRAFT_COMPILE:
++            key = ("_mks", count, int(vsub[0].shape[0]), str(x.dtype), str(token_dtype))
++            fn = self.__dict__.get(key)
++            if fn is None:
++                fn = mx.compile(self._markov_subset_fn(count, x.dtype, token_dtype))
++                self.__dict__[key] = fn
++            toks, confs = fn(base, context, anchor, *vsub)
++            if _CONF_ON:
++                self.__dict__["_conf"] = confs
++            if _DT:
++                _dt("markov", _t0)
++            return toks
++        if _DRAFT_COMPILE and anchor.size == 1:
++            key = ("_mk", count, str(x.dtype), str(token_dtype))
++            fn = self.__dict__.get(key)
++            if fn is None:
++                fn = mx.compile(self._markov_greedy_fn(count, x.dtype, token_dtype))
++                self.__dict__[key] = fn
++            toks, confs = fn(base, context, anchor)
++            if _CONF_ON:
++                self.__dict__["_conf"] = confs
++            if _DT:
++                _dt("markov", _t0)
++            return toks
+         state = mx.zeros((anchor.size, self.config.markov_rank), x.dtype)
+         previous, tokens = anchor, []
+         _conf = _CONF_ON and anchor.size == 1
+@@ -621,4 +726,58 @@
+             tokens.append(previous[:, None])
+         if _conf:
+             self.__dict__["_conf"] = mx.concatenate(confs)
++        if _DT:
++            _dt("markov", _t0)
+         return mx.concatenate(tokens, axis=1).astype(token_dtype)
++
++    def _markov_subset_fn(self, count, dtype, token_dtype):
++        head, cap = self.markov_head, self.config.final_logit_softcapping
++
++        def run(base, context, anchor, ids, w, fw, fb):
++            rank = head.markov_w1.weight.shape[1]
++            state = mx.zeros((1, rank), dtype)
++            previous, tokens, confs = anchor, [], []
++            for i in range(count):
++                inputs = mx.concatenate([state, head.markov_w1(previous)], axis=-1)
++                raw = (
++                    inputs.astype(mx.float32)
++                    @ head.rnn_proj.weight[:, : 2 * rank].astype(mx.float32).T
++                    + context[:, i]
++                ).astype(dtype)
++                gate, candidate, output = mx.split(raw, 3, axis=-1)
++                gate = mx.sigmoid(gate.astype(mx.float32)).astype(dtype)
++                candidate = mx.tanh(candidate.astype(mx.float32)).astype(dtype)
++                state = gate * state + (1 - gate) * candidate
++                latent = mx.tanh(output.astype(mx.float32)).astype(dtype)
++                logits = base[:, i] + mx.addmm(fb, latent, fw.T)
++                if cap:
++                    logits = (cap * mx.tanh(logits.astype(mx.float32) / cap)).astype(dtype)
++                j = mx.argmax(logits, axis=-1)
++                previous = ids[j].reshape(-1)
++                tokens.append(previous[:, None])
++                lf = logits.astype(mx.float32)
++                confs.append(1.0 / mx.exp(lf - lf.max(axis=-1, keepdims=True)).sum(axis=-1))
++            return mx.concatenate(tokens, axis=1).astype(token_dtype), mx.concatenate(confs)
++
++        return run
++
++    def _markov_greedy_fn(self, count, dtype, token_dtype):
++        head, cap = self.markov_head, self.config.final_logit_softcapping
++        vocab = self.config.unpadded_vocab_size
++
++        def run(base, context, anchor):
++            state = mx.zeros((1, self.config.markov_rank), dtype)
++            previous, tokens, confs = anchor, [], []
++            for i in range(count):
++                state, bias = head.step(state, previous, context[:, i])
++                logits = base[:, i] + bias
++                if cap:
++                    logits = (cap * mx.tanh(logits.astype(mx.float32) / cap)).astype(dtype)
++                lf = logits[:, :vocab]
++                previous = mx.argmax(lf, axis=-1).reshape(-1)
++                tokens.append(previous[:, None])
++                lf = lf.astype(mx.float32)
++                confs.append(1.0 / mx.exp(lf - lf.max(axis=-1, keepdims=True)).sum(axis=-1))
++            return mx.concatenate(tokens, axis=1).astype(token_dtype), mx.concatenate(confs)
++
++        return run

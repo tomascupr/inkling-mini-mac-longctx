@@ -9,6 +9,13 @@ from pathlib import Path
 M=os.path.expanduser("~/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini")
 model, proc = load(M); drop_vision(model)
 tok = proc.tokenizer if hasattr(proc, "tokenizer") else proc
+# DRAFT=8: greedy answers through the DSpark draft head (exact verify; the env.sh defaults), to check the
+# drafted path writes the same tokens. Teacher-forced top-1 does not involve the draft head.
+DRAFT=int(os.environ.get("DRAFT","0")); gen_kw={}
+if DRAFT:
+    from mlx_vlm.speculative.drafters import load_drafter
+    _d,_k=load_drafter(M); mx.eval(_d.parameters()); _d.bind(model)
+    gen_kw=dict(draft_model=_d, draft_kind=_k, draft_block_size=DRAFT)
 corpus=(Path.home()/".exo-inkling-bench/bf16-longctx/corpus.txt").read_text()
 Q=["Summarise the passage above in three sentences.",
    "List every person named in the passage above.",
@@ -48,11 +55,13 @@ for i,p in enumerate(prompts):
         class _R: pass
         r=_R(); r.prompt_tokens=len(pids)
     else:
-        for r in stream_generate(model, proc, p, max_tokens=N, temperature=0.0, prefill_step_size=STEP):
+        for r in stream_generate(model, proc, p, max_tokens=N, temperature=0.0, prefill_step_size=STEP, **gen_kw):
             gen.append(r.token)
     rec={"i":i,"prompt_tokens":r.prompt_tokens,"greedy":gen}
     cont = gen if MODE=="ref" else ref["runs"][i]["greedy"]
-    if pids is not None and len(pids)==r.prompt_tokens:
+    if os.environ.get("SKIP_TF")=="1":
+        pass
+    elif pids is not None and len(pids)==r.prompt_tokens:
         rec["tf_argmax"]=tf_argmax(pids+cont, len(pids))
         rec["tf_target"]=cont
     else:
