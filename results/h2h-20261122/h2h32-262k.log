@@ -1,0 +1,26 @@
+# Studio 1 same-session 262k head-to-head (h32), 2026-11-22 23:15:03–23:59:44 CET
+# MLX-Serve first (ddalcu, 26.11.4-pre-release.1), then ours (serve.sh + 0019 overlay
+# copied from S2 stack30 + BQ_SWA=64). Official Inkling-2-Mini weights, draft on,
+# server-log tok/s, needle VIOLET-ANCHOR-4729. Prompt tokens=262126.
+# MLX-Serve: --ctx-size 294912 --timeout 7200, 4k 16-token warmup, then 2 measured runs.
+# Ours: 3 runs at 262k (first is the first request at this length). No QA gate.
+mlxserve start 23:15:03
+23:15:05 CET server ready (h32-2315-262144-draft-on)
+RERUN_LONG_DONE ctx=262144 fail=0 tag=h32-2315-262144
+mlxserve log /Users/tomascupr/.exo-inkling-bench/mlxserve/logs/serve-h32-2315-262144-draft-on.log
+  <- 4078+16 tokens streamed [prefill: 1106.5 tok/s, decode: 113.2 tok/s] [length]
+  <- 262126+128 tokens streamed [prefill: 478.0 tok/s, decode: 33.8 tok/s] [stop]
+  <- 262126+128 tokens streamed [prefill: 477.9 tok/s, decode: 30.4 tok/s] [stop]
+[wired] mode=max limit=53084 MB
+Prefill chunk: 4096 tokens (memory-sized down from 8192; --prefill-chunk overrides)
+Context size: 294912 tokens (manual)
+Request timeout: 7200s
+RSS: 17.5G  Mem: 47%  CPU: 4%  GPU: 82%
+== ours h32-262144 23:33:38–23:59:44 CET  STK=stack32 STEP=8192 PORT=52790
+LOG prompt_tokens=262126 generated_tokens=129 elapsed=521.980s prefill=507.4 tok/s decode=36.6 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=262126 generated_tokens=129 elapsed=519.735s prefill=508.0 tok/s decode=38.7 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=262126 generated_tokens=129 elapsed=519.946s prefill=507.8 tok/s decode=38.7 tok/s finish_reason=stop in_flight=0
+needle_found true/true (MLX-Serve r1/r2) and true/true/true (ours r0/r1/r2); all VIOLET-ANCHOR-4729
+SRVDONE fail=0
+PAIR_DONE ctx=262144 mlx_fail=0 ours_fail=0 23:59:44 CET
+H2H32_262K_DONE

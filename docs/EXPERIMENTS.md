@@ -369,3 +369,16 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   (MLX-Serve 45.0 then 51.6–51.7; ours 52.3 then 56.6–56.7), the same first-use dip seen at 4k/32k; prefill is steady.
   Needle found in all 6 answers (`VIOLET-ANCHOR-4729`). 131k fit on the 64 GB Mac (MLX-Serve `--ctx-size 163840`,
   admission 4.5 / 27.9 GB free). Logs: `results/h2h-20261122/h2h31-131k.log`.
+- **S1 same session h32 (23:15–23:59 CET), 262k rematch, MLX-Serve then ours** (`scripts/serve.sh` + patch 0019
+  overlay copied from the Studio 2 h30 stack + `BQ_SWA=64`; official checkpoint, draft on, same needle prompts,
+  server-log tok/s). Prompt 262,126 tokens. MLX-Serve had a 4k 16-token warmup, then 2 runs; ours ran 3 times at
+  262k. Reading: MLX-Serve 478.0 / 477.9 (median 478.0) vs ours 507.4 / 508.0 / 507.8 (median 507.8, **+6.2%**).
+  Writing: MLX-Serve 33.8 / 30.4 (median 32.1) vs ours 36.6 / 38.7 / 38.7 (median 38.7, **+20.6%**). Dropping the
+  first request at this length (MLX-Serve left with one run; ours two warm runs): reading 477.9 vs 507.9 (**+6.3%**),
+  writing 30.4 vs 38.7 (**+27.3%**). Prefill is steady on both sides. Ours writing shows the usual first-use dip
+  (36.6 then 38.7 / 38.7); MLX-Serve writing went 33.8 then 30.4, so the second run was slower. Needle found in all
+  five 262k answers (`VIOLET-ANCHOR-4729`). 262k fit (MLX-Serve `--ctx-size 294912`, `--timeout 7200`; start-of-session
+  RSS 17.5 GiB; no later RSS or peak-memory line was logged on either side). Our 262k server was stopped cleanly
+  (SIGTERM, `SRVDONE fail=0`, port 52790 closed) at 23:59:44 CET. The same harness then started a 524k rematch,
+  which is not in this log. Logs: `results/h2h-20261122/h2h32-262k.log`.
+
