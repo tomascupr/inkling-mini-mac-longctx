@@ -340,3 +340,6 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   (+0.9%). Output text identical in all runs. WIN.
 - Prefill value norm and casts through `rms_norm_cast` (`PF_VN`): 0.50 -> 0.56 ms per visit (bitwise), server 1128.1 /
   1128.4 vs 1127.0. FAIL; not kept.
+- Attention projections as one GEMM over concatenated weights (bf16, S1 microbench, all combinations bitwise): 4077
+  rows kv 3.35 -> 3.03 ms, qg 7.96 -> 7.95, q+g+k+v 10.51 -> 10.50, q+g+k+v+r+sink 11.07 -> 11.06; 8192 rows the same
+  within 0.4%. The GEMMs are compute-bound, so merging only saves one launch. FAIL; not wired in.
