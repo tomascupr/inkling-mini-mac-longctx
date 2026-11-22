@@ -1,0 +1,10 @@
+11:53:27 ctx 32768 draft k4
+{"ctx": 32768, "step": 2048, "max_tokens": 256, "elapsed_s": 39.92531383293681, "prompt_tokens": 32750, "prompt_tps": 864.9140038274913, "decode_tps": 65.98692425796587, "gen_tokens": 126, "peak_mlx_GiB": 21.40716179460287, "needle_found": 
+11:54:11 ctx 131072 draft k4
+{"ctx": 131072, "step": 2048, "max_tokens": 256, "elapsed_s": 213.06687370804138, "prompt_tokens": 131054, "prompt_tps": 622.7012767441114, "decode_tps": 52.667872434008096, "gen_tokens": 126, "peak_mlx_GiB": 24.407917104661465, "needle_fou
+11:57:48 ctx 262144 draft k4
+{"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 583.6077610419597, "prompt_tokens": 262126, "prompt_tps": 452.183737677574, "decode_tps": 35.72313696169284, "gen_tokens": 129, "peak_mlx_GiB": 28.408893667161465, "needle_found"
+ctx 32768 k4 ptps 864.9 dtps 65.99 peak 21.41 needle True tokens_equal True sha_equal True (fork 845.5/33.46/26.19) {'rounds': 38, 'accepted': 88, 'accept_rate': 0.7719298245614035, 'lookup_rounds': None}
+ctx 131072 k4 ptps 622.7 dtps 52.67 peak 24.41 needle True tokens_equal True sha_equal True (fork 605.1/27.13/29.62) {'rounds': 38, 'accepted': 88, 'accept_rate': 0.7719298245614035, 'lookup_rounds': None}
+ctx 262144 k4 ptps 452.2 dtps 35.72 peak 28.41 needle True tokens_equal True sha_equal True (fork 439.0/21.81/34.18) {'rounds': 46, 'accepted': 82, 'accept_rate': 0.5942028985507246, 'lookup_rounds': None}
+G7DONE

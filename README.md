@@ -31,22 +31,25 @@ Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 Ask about a 131k-token document once: reading it takes about 3.6 minutes. Ask a follow-up, and the answer starts
 in **1.5 s** (1.46–1.54 s measured), because the Mac keeps the document's processed state instead of reading it again.
 
-## Optional: speculative decoding, much faster writing
+## Optional: speculative decoding, much faster writing, still bit-identical
 
 Inkling-2-Mini ships a small draft head (DSpark) that guesses several words ahead; the big model then checks
-all the guesses in one pass, so the answer is the same, just written faster. The standard build already supports it.
-Our optional `0005` patch (install with `DSPARK=1`; it applies to the previous build, `stacked-v4.patch`, until it is ported) makes the checking step a compiled program that reads the
-long document's memory once per check instead of once per guessed word:
+all the guesses in one pass. Usually that check is computed differently from normal one-word-at-a-time writing, so
+the result is "the same words, almost always" (rounding can flip a near-tie). **Our check computes every guessed
+position with exactly the same GPU arithmetic as normal writing** (same kernels, same order of additions, each
+weight and each block of the document's memory read once for all guesses), so the output is **bit-for-bit the
+same as writing without the draft**: same tokens and the same per-token log-probabilities. Install with
+`EXACT_DSPARK=1` (patch `0007`):
 
-| Writing speed (tok/s) | 4k prompt | 32k prompt | 131k prompt |
+| Writing speed (tok/s) | 32k prompt | 131k prompt | 262k prompt |
 |---|---:|---:|---:|
-| Standard build, no draft | 33.1 | 27.0 | 16.2 |
-| Standard build + draft head | 58.8 | – | – |
-| This repo (previous build `stacked-v4`), no draft | 50.6 | 47.2 | 35.8 |
-| **This repo + draft head + `0005`** | **65.5** (block 5) | **63.8** (block 8) | **53.5** (block 8) |
+| Standard build, no draft | 27.0 | 16.2 | 10.7 |
+| This repo, no draft | 53.7 | 40.2 | 29.8 |
+| **This repo + draft head (block 4), bit-identical** | **66.0** | **52.7** | **35.7** |
 
-Same output tokens as without the draft in every run (checked token by token). The 4k first request is 63.5
-(it pays a one-time setup). Details: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+Each draft run matched the unpatched code's no-draft output exactly (tokens and log-probability sha256) and found
+the hidden fact. The draft helps most on long documents, where every written word otherwise re-reads the whole
+document's memory. Env and details: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## What we changed
 
@@ -89,7 +92,7 @@ code), not in accuracy. Same run: 1.3× faster reading and 1.8× faster writing 
 ## What's next
 
 - **1M tokens on one Mac:** measured (above). Next: speculative decoding and the prefix cache at 1M.
-- **Speculative decoding** at 262k+ and combined with the prefix cache: not measured yet.
+- **Speculative decoding at 524k/1M** (synthetic tests: 1M about 11 → 17 tok/s, memory is tight) and combined with the prefix cache: not measured end to end yet.
 - More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~66–78% of its memory bandwidth on decode (32k–262k).
 
 ## Credits

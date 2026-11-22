@@ -22,6 +22,24 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 524k (524,270), previous build | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
 | 1M (1,048,558), step 512, text-only, previous build | **156.0** | **10.04** | **50.04** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
 
+**Bit-identical speculative decoding (`0007`, 2026-11-22 11:53–12:08 CET).** `stacked.patch` + `0007-exact-dspark.patch`,
+env `MLX_VLM_INKLING2_INCREMENTAL_DRAFT_PREFILL=1 MLX_VLM_INKLING2_EXACT_VERIFY=1 MLX_VLM_INKLING2_COMPILED_VERIFY=1
+MLX_VLM_INKLING2_DRAFT_CTX_WINDOW=65536` plus the recommended env, draft block 4, `scripts/exact_check_draft.py`
+(`BLOCK=4`), one process; log `results/gates/gate-stack7-draft-20261122-1153.log`, runs `results/gates/s7-draft-k4-*.json`:
+
+| Context | Reading tok/s | Writing tok/s (no draft → draft) | Accepted / drafted | Peak GiB | Tokens and logprob sha vs unpatched fork (no draft) |
+|---|---:|---:|---:|---:|---|
+| 32k | 864.9 | 53.73 → **65.99** | 77% | 21.41 | identical |
+| 131k | 622.7 | 40.16 → **52.67** | 77% | 24.41 | identical |
+| 262k | 452.2 | 29.76 → **35.72** | 59% | 28.41 | identical |
+
+How: the verifier computes each of the k block rows with the single-token decode step's own kernels and reduction
+order (multi-row kernels that share weight, expert and KV-block reads across rows but keep each row's arithmetic),
+writes only accepted rows into the caches, and keeps the drafter's view of the document in a fixed 64k-token window
+(the stock drafter copied its whole context every round: 4 GiB at 1M). Built by the decode track on top of the DSpark
+track's compiled verify (0005). Synthetic-depth tests (zero KV at depth, short prompt on top; not end to end): 524k
+19.5 → 28.8 tok/s, 1M 11.2 → 17.4 tok/s with peak 51.30 of 51.84 GiB.
+
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
 *without* a draft model. The standard build can already use Inkling's DSpark draft head: on the same Mac, 4k prompt,
 it writes at **58.8 tok/s** with draft block 5 (40.8 with block 3, 56.3 with block 7;
@@ -95,6 +113,7 @@ optimization log, step 2048; it was not part of the exactness gate.
 | `patches/0002-compiled-decode.patch` | Decode: one `mx.compile`d decode step (fewer graph nodes and kernels per token), wired into `generate_step`; v4 (2026-11-22 08:16, current) adds a fused MoE decode (router → top-k + gate/up + SwiGLU, then down + combine), o_proj with the attention gate and tail, fused message gates, multi-query attention residuals, a custom bf16 GEMV for the projections and an MLX-replica sliding-window attention with the bias read in place; v3 (03:20) added about a dozen fused kernels that copy MLX's own arithmetic order (attention-residual mixing, router, MoE output combine with its short convolution, l2-clips, norms, conv-state updates, merged attention projections), a decode attention kernel whose cost follows the live context length rather than the reserved KV size, and a fix so the saved conv state no longer keeps a whole prefill chunk alive (prefill working memory 0.43 GiB per 512-token step; projected 1M peak ~50.0 GiB). All bit-identical. Applies on top of 0001. | Claude track |
 | `patches/0003-prefill-attn-moe.patch` | Prefill: relative-attention kernel tiles (BQ=64, fast mask, global visits only) and a sort-free inverse permutation in the MoE (SwitchGLU) path, value-identical. Applies on top of 0001 + 0002. (Codex's compiled loop message gate, +0.6% prefill, is left out: it disabled the compiled decode path.) | Codex track |
 | `patches/0004-prefix-cache.patch` | Prefix cache: keep the fused attention kernel after a cached prefix is restored (no full mask over the whole cache), keep the conversation's reasoning effort in compaction so it hits the checkpoint, tests. Applies to the fork, and on top of `stacked.patch` (with fuzz). | prefix-cache track |
+| `patches/0007-exact-dspark.patch` | On top of `stacked.patch`: bit-identical speculative decoding with the DSpark draft head (exact multi-row verifier, windowed draft context; includes the 0005 compiled-verify port). Without a draft model, output is bit-identical to `stacked.patch`. | decode track (Claude) + DSpark track (Codex) |
 | `patches/0006-prefix-cache-evict-fix.patch` | Prefix cache, on top of 0004: port of betizzel/mlx-vlm 295f5b21. When a follow-up's checkpoint extends the one it continues, storing it no longer also reserves room for the next prefill, so it can replace the old checkpoint instead of being dropped (upstream saw the 2nd follow-up at 125k re-read the whole conversation: 295.8 s). Optional `APC_EVICT_SUPERSEDED=1` evicts superseded turns. Bookkeeping only, no math. Confirmed on our base: the upstream tests fail without it (3 of 726 in `test_cache.py`) and all 726 pass with it. Not yet re-measured end to end on a 3-turn 131k conversation. | betizzel (ported) |
 | `patches/0005-dspark-compiled-verify.patch` | Optional, on top of `stacked.patch`: faster speculative decoding with the DSpark draft head (incremental draft-prompt capture, compiled block verify, offset-only rollback, shared split-K verify attention). Opt-in via the three env vars above; without a draft model, outputs are bit-identical to `stacked.patch`. Not yet combinable with 0004. | DSpark track (Codex) |
 

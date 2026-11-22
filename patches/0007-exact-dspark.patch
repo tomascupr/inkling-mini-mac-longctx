@@ -1,0 +1,3721 @@
+diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py
++++ b/mlx_vlm/generate/ar.py
+@@ -386,7 +386,10 @@
+ 
+     # Speculative decoding setup
+     last_outputs = None
+-    speculative_prefill = SpeculativePrefill(draft_kind, draft_model)
++    speculative_prefill = SpeculativePrefill(draft_kind, draft_model, model)
++    if draft_model is not None and input_ids is not None and input_ids.shape[0] == 1:
++        # The prompt's token ids for prompt-lookup proposals (dflash rounds).
++        draft_model.__dict__["_lookup_prompt_ids"] = input_ids
+     speculative_prefill_capture_kwargs = {}
+     if draft_model is not None:
+         from ..speculative.drafters import validate_drafter_compatibility
+@@ -547,7 +550,14 @@
+             if prefill_step_size is not None and should_chunk
+             else None
+         )
+-        _exact_reserve_kv(prompt_cache, inputs_embeds.shape[1] + max(int(max_tokens or 0), 0))
++        # A speculative verify block writes up to its size past the last
++        # emitted token: room for it, so the verifier never needs a regrow.
++        _exact_reserve_kv(
++            prompt_cache,
++            inputs_embeds.shape[1]
++            + max(int(max_tokens or 0), 0)
++            + (32 if draft_model is not None else 0),
++        )
+         if prefill_step_size is not None and should_chunk:
+             # Chunked prefill with embeddings
+             total_tokens = inputs_embeds.shape[1]
+@@ -2072,7 +2082,7 @@
+         self._prompt_uids = list(uids)
+         self.max_tokens = max_tokens
+         self.prefill_step_size = prefill_step_size
+-        self._speculative_prefill = SpeculativePrefill(draft_kind, draft_model)
++        self._speculative_prefill = SpeculativePrefill(draft_kind, draft_model, model)
+         self.draft_model = draft_model
+         self.draft_kind = draft_kind
+         self.draft_block_size = draft_block_size
+diff -ruN a/mlx_vlm/models/inkling2/exact_verify.py b/mlx_vlm/models/inkling2/exact_verify.py
+--- a/mlx_vlm/models/inkling2/exact_verify.py
++++ b/mlx_vlm/models/inkling2/exact_verify.py
+@@ -0,0 +1,845 @@
++"""Exact k-row speculative verifier for Inkling 2 / 2-loop (track B3).
++
++Row r of a verify block (the token at position offset + r) is computed with
++exactly the operations of the compiled single-token decode step
++(fast_decode.py) for that position: the same kernels on the same inputs, so
++its logits, logprobs, K/V rows and convolution states are bitwise those of
++non-speculative decoding. The rows are evaluated layer visit by layer visit
++(phases inside a visit: attention inputs and K/V rows for all rows, then the
++attention of every row, then the attention tails and MLPs), which lets
++weight reads be shared across rows later without changing any row's
++arithmetic. Rows interact only through the caches:
++- global K/V: the block's rows are kept in a side buffer; row r's attention
++  reads the cache below `offset` plus rows 0..r (verify_kernels.global_rows);
++  the accepted rows are written into the cache at commit;
++- sliding rings: likewise with the ring slots of rows 0..r
++  (verify_kernels.sliding_rows); accepted rows are written at commit;
++- short convolutions: the decode kernels are called row after row on one
++  StepConvCache, so row r starts from the state after row r - 1; the state
++  after every row is returned for the commit.
++"""
++
++import os
++
++import mlx.core as mx
++
++from ..cache import ArraysCache, CacheList, KVCache, RotatingKVCache
++from .step_cache import StepConvCache
++
++_ENABLED = os.environ.get("MLX_VLM_INKLING2_EXACT_VERIFY", "0") == "1"
++# Global attention: rows per simdgroup of the shared-read kernel
++# (verify_kernels.global_rows_shared); 0 = one threadgroup per row.
++_GLOBAL_RPS = int(os.environ.get("MLX_VLM_INKLING2_EV_GLOBAL_RPS", "2"))
++# Lane-parallel variant (verify_kernels.global_rows_shared2) with simd_sum's
++# butterfly order ("desc" = 16..1, "asc" = 1..16); "" = global_rows_shared.
++_GLOBAL_LANE = os.environ.get("MLX_VLM_INKLING2_EV_GLOBAL_LANE", "asc")
++# "auto": by row count (below); "rows": per-row grid; "shared": as configured.
++_GLOBAL_KERNEL = os.environ.get("MLX_VLM_INKLING2_EV_GLOBAL_KERNEL", "auto")
++# Projections of all rows in one multi-row GEMV (verify_kernels.gemv_m).
++_GEMV_M = os.environ.get("MLX_VLM_INKLING2_EV_GEMV_M", "1") == "1"
++# Rows carried as (R, D) arrays through every per-position kernel (one call
++# per visit instead of one per row; far fewer graph nodes per round).
++_BATCHED = os.environ.get("MLX_VLM_INKLING2_EV_BATCHED", "1") == "1"
++# rel = r @ rel_proj for all rows in one matmul (the K = 16 GEMM per row).
++_REL_BATCHED = os.environ.get("MLX_VLM_INKLING2_EV_REL_BATCHED", "1") == "1"
++# The head GEMV of all rows in one call (kernels.head_logits, M rows).
++_HEAD_M = os.environ.get("MLX_VLM_INKLING2_EV_HEAD_M", "1") == "1"
++# o_proj tails / MoE of all rows in one call each (verify_kernels).
++_OTAIL_M = os.environ.get("MLX_VLM_INKLING2_EV_OTAIL_M", "1") == "1"
++_MOE_M = os.environ.get("MLX_VLM_INKLING2_EV_MOE_M", "1") == "1"
++
++
++def _flags_ok():
++    """The decode step's fused paths this verifier replicates."""
++    from . import language as L
++    from ..inkling2_loop import language as LL
++
++    return (
++        L._FUSED_CONV_STEP and L._OWN_CONV_STATE and L._FUSED_ATTN_RES
++        and L._FUSED_MLP_TAIL and L._FUSED_ATTN_TAIL and L._FUSED_NORM_CAST
++        and L._FUSED_ROUTER and L._FUSED_L2_CLIP and L._FUSED_MOE and L._FUSED_O_TAIL
++        and L._SLIDING_SDPA and L._GATE_IN_ATTN and not L._FUSED_CONV_HEAD
++        and L._FUSED_RES_NORM and L._FUSED_ATTN_RES_MULTI and not L._ROUTER_TOPK
++        and not L._KV_AFTER and len(L._CUSTOM_GEMV) == 3 and LL._FUSED_MSG_GATE
++    )
++
++
++class _RowConv(StepConvCache):
++    """StepConvCache that records the state after each row per index."""
++
++    def __init__(self, states):
++        super().__init__(states)
++        self.after = {i: [] for i in range(len(states))}
++
++    def record(self, *indices):
++        for i in indices:
++            self.after[i].append(self.cache[i])
++
++
++def _projections_rows(attn, parts):
++    """Attention._decode_projections for every row; parts: per row (x,
++    key_input, value_input). With _GEMV_M the rows share each weight read
++    (verify_kernels.gemv_m: per row the decode GEMV's arithmetic)."""
++    if not _GEMV_M:
++        out = []
++        for x, ki, vi in parts:
++            fused = attn._decode_projections(x, ki, vi)
++            if fused is None:
++                raise RuntimeError("exact verify: fused decode projections unavailable")
++            out.append(fused)
++        return out
++    from . import language as L
++    from .verify_kernels import gemv_m
++
++    fused = attn.__dict__.get("_fused_qrgkv")
++    if fused is None or attn.sharding_group is not None or L._CUSTOM_GEMV != (1, 8, 18):
++        raise RuntimeError("exact verify: fused decode projections unavailable")
++    widths = [attn[n].weight.shape[0] for n in ("q_proj", "r_proj", "gate_proj", "k_proj")]
++    cuts = [sum(widths[: i + 1]) for i in range(4)]
++    m = len(parts)
++    xs = mx.concatenate([p[0].reshape(1, -1) for p in parts])
++    out = []
++    if all(ki is x and vi is x for x, ki, vi in parts):
++        y = gemv_m(xs, fused)
++        for r in range(m):
++            q, rr, g, k, v = mx.split(y[r].reshape(1, 1, -1), cuts, axis=-1)
++            out.append((q, k, v, rr, g))
++        return out
++    yq = gemv_m(xs, fused[: cuts[2]])
++    yk = gemv_m(mx.concatenate([p[1].reshape(1, -1) for p in parts]), attn.k_proj.weight)
++    yv = gemv_m(mx.concatenate([p[2].reshape(1, -1) for p in parts]), attn.v_proj.weight)
++    for r in range(m):
++        q, rr, g = mx.split(yq[r].reshape(1, 1, -1), cuts[:2], axis=-1)
++        out.append((q, yk[r].reshape(1, 1, -1), yv[r].reshape(1, 1, -1), rr, g))
++    return out
++
++
++def _attn_pre(attn, x, key_input, value_input, conv, offset, fused):
++    """Attention.__call__ for one decode token up to the attention, given its
++    projections: returns (q, k, v, rel, sinks, gate) as the decode step's
++    _decode_attention_gated receives / computes them."""
++    from . import language as L
++
++    cfg = attn.config
++    q_rows, k, v, r_rows, gate_rows = fused
++    if attn.is_sliding:
++        k = attn.k_sconv(k, conv, None)
++        v = attn.v_sconv(v, conv, None)
++    else:
++        k = attn.k_sconv(k, key_input, conv, None)
++        v = attn.v_sconv(v, value_input, conv, None)
++    q = L._l2_clip(
++        q_rows.reshape(1, 1, attn.n_heads, attn.head_dim),
++        cfg.qk_l2_clip_threshold,
++        attn.q_scale,
++    )
++    k = L._l2_clip(
++        k.reshape(1, 1, attn.n_kv, attn.head_dim), cfg.qk_l2_clip_threshold
++    )
++    v = v.reshape(1, 1, attn.n_kv, attn.head_dim)
++    if cfg.use_value_norm_no_gamma:
++        if not (
++            v.dtype == x.dtype == mx.bfloat16
++            and attn.head_dim % 128 == 0
++            and attn.head_dim // 4 <= 1024
++        ):
++            raise RuntimeError("exact verify: value norm path")
++        from .kernels import rms_norm_cast
++
++        v = rms_norm_cast(v, None, cfg.rms_norm_eps, x.dtype)
++    r = L._l2_clip(
++        r_rows.reshape(1, 1, attn.n_heads, cfg.d_rel),
++        cfg.rel_l2_clip_threshold,
++        attn.rel_scale,
++    )
++    if not attn.is_sliding and cfg.log_scaling_n_floor is not None:
++        positions = L._const_arange(1) + mx.array(offset)[..., None] + 1
++        tau = 1 + cfg.log_scaling_alpha * mx.log(
++            mx.maximum(positions / cfg.log_scaling_n_floor, 1)
++        )
++        q = (q.astype(mx.float32) * tau[..., None, None]).astype(x.dtype)
++        r = (r.astype(mx.float32) * tau[..., None, None]).astype(x.dtype)
++    q, k, v = (a.transpose(0, 2, 1, 3) for a in (q, k, v))
++    rel = r[0, 0] @ attn.rel_proj.astype(x.dtype)
++    sinks = attn.sink_proj(x)[0, 0]
++    return q, k, v, rel, sinks, gate_rows
++
++
++class ExactVerifier:
++    def __init__(self, lm, block, capture_layer_ids):
++        from .fast_decode import prepare_decode
++
++        prepare_decode(lm)
++        self.lm = lm
++        self.block = int(block)
++        self.capture_layer_ids = tuple(capture_layer_ids)
++        self.kinds = None
++        self.fn = mx.compile(self._step_batched if _BATCHED else self._step)
++
++    # ------------------------------------------------------------------
++    def _visit(self, layer, rows, cache_kv, conv, kind, offset, idx, messages):
++        """One layer visit for every row. rows: list of dicts with x, blocks."""
++        from . import language as L
++        from .verify_kernels import global_rows, sliding_rows
++
++        R = len(rows)
++        attn = layer.self_attn
++        dtype = rows[0]["x"].dtype
++        # Phase A: attention inputs, projections, k/v convolutions (row order).
++        pre, ins = [], []
++        for r, row in enumerate(rows):
++            x, blocks = row["x"], row["blocks"]
++            msg = None if messages is None else messages[r]
++            if msg is None:
++                normed = (
++                    layer.attention_input.normed(blocks, x, layer.input_layernorm, dtype)
++                    if layer.is_sliding and layer.attention_input is not None
++                    else None
++                )
++                mixed = (
++                    None
++                    if normed is not None
++                    else layer.attention_input(blocks, x)
++                    if layer.attention_input is not None
++                    else x[..., None, :]
++                )
++                if layer.is_sliding:
++                    xin = (
++                        normed
++                        if normed is not None
++                        else L._norm_cast(layer.input_layernorm, mixed[..., 0, :], dtype)
++                    )
++                    parts = (xin, xin, xin)
++                else:
++                    ps = [mixed[..., min(i, mixed.shape[-2] - 1), :] for i in range(3)]
++                    parts = tuple(
++                        L._norm_cast(norm, part, dtype)
++                        for norm, part in zip(
++                            (layer.q_input_layernorm, layer.k_input_layernorm,
++                             layer.v_input_layernorm),
++                            ps,
++                        )
++                    )
++            else:
++                from ..inkling2_loop.language import _batched_qkv_gates
++
++                mixed = layer.attention_input(blocks, x)
++                q_msg, k_msg, v_msg = (msg[..., i, :] for i in range(3))
++                if layer.is_sliding:
++                    shared = mixed[..., 0, :]
++                    ps = (shared, shared, shared)
++                    norms = (layer.input_layernorm,) * 3
++                else:
++                    ps = tuple(mixed[..., i, :] for i in range(3))
++                    norms = (layer.q_input_layernorm, layer.k_input_layernorm,
++                             layer.v_input_layernorm)
++                stack = layer.__dict__.get("_qkv_gate_stack")
++                if stack is None:
++                    raise RuntimeError("exact verify: gate stack missing")
++                gated = _batched_qkv_gates(
++                    stack, layer.q_message_gate.eps, ps, (q_msg, k_msg, v_msg)
++                )
++                if layer.is_sliding:
++                    nrm = L._norm_cast(layer.input_layernorm, gated, dtype)
++                    parts = tuple(nrm[i : i + 1].reshape(x.shape) for i in range(3))
++                else:
++                    parts = tuple(
++                        L._norm_cast(norm, gated[i : i + 1].reshape(x.shape), dtype)
++                        for i, norm in enumerate(norms)
++                    )
++            if layer._tail_args(x, conv, None) is None:
++                raise RuntimeError("exact verify: fused o_proj tail unavailable")
++            ins.append(parts)
++        projs = _projections_rows(attn, ins)
++        for r in range(R):
++            parts = ins[r]
++            q, k, v, rel, sinks, gate = _attn_pre(
++                attn, parts[0], parts[1], parts[2], conv, offset + r, projs[r]
++            )
++            conv.record(attn.k_sconv.conv_idx, attn.v_sconv.conv_idx)
++            pre.append((q, k, v, rel, sinks, gate))
++        # Phase B: the attention of every row.
++        q = mx.concatenate([p[0].reshape(1, attn.n_heads, -1) for p in pre])
++        k_new = mx.concatenate([p[1].reshape(1, attn.n_kv, -1) for p in pre])
++        v_new = mx.concatenate([p[2].reshape(1, attn.n_kv, -1) for p in pre])
++        rel = mx.stack([p[3] for p in pre])
++        gate = mx.concatenate([p[5].reshape(1, -1) for p in pre])
++        scale = attn.head_dim**-0.5
++        keys, values = cache_kv
++        if kind == "g":
++            sinks = mx.stack([p[4] for p in pre])
++            # Measured at 1M (kbench_attn): lane-parallel RPS 2 is fastest for
++            # up to 4 rows (15.7 vs 18.5 ms per visit), the per-row grid for 8
++            # (36.1 vs 41.3 ms).
++            if _GLOBAL_KERNEL == "rows" or (_GLOBAL_KERNEL == "auto" and R > 4):
++                out = global_rows(q, keys, values, k_new, v_new, offset, rel, sinks, gate,
++                                  scale=scale)
++            elif _GLOBAL_RPS > 0 and _GLOBAL_LANE in ("asc", "desc"):
++                from .verify_kernels import global_rows_shared2
++
++                out = global_rows_shared2(q, keys, values, k_new, v_new, offset, rel, sinks,
++                                          gate, scale=scale, rps=_GLOBAL_RPS,
++                                          desc=_GLOBAL_LANE == "desc")
++            elif _GLOBAL_RPS > 0:
++                from .verify_kernels import global_rows_shared
++
++                out = global_rows_shared(q, keys, values, k_new, v_new, offset, rel, sinks,
++                                         gate, scale=scale, rps=_GLOBAL_RPS)
++            else:
++                out = global_rows(q, keys, values, k_new, v_new, offset, rel, sinks, gate,
++                                  scale=scale)
++        else:
++            sinks = mx.stack([p[4].astype(q.dtype) for p in pre])
++            s0 = mx.where(idx == keys.shape[2], 0, idx)
++            out = sliding_rows(q, keys, values, k_new, v_new, s0, rel, sinks, gate,
++                               scale=scale, blocks=L._SLIDING_BLOCKS)
++        new_kv = (k_new, v_new)
++        # Phase C: attention tail, MLP (row order: their convolutions chain).
++        from .gemv_kernels import o_proj_tail
++
++        ai, mi = layer.attn_sconv.conv_idx, layer.mlp_sconv.conv_idx
++        residuals = None
++        if _OTAIL_M:
++            from .verify_kernels import o_proj_tail_m
++
++            state, conv_weight, _, width = layer._tail_args(rows[0]["x"], conv, None)
++            skips = (
++                None
++                if layer.is_block_boundary
++                else mx.concatenate([row["x"].reshape(1, -1) for row in rows])
++            )
++            res_all, st_all = o_proj_tail_m(
++                out.reshape(R, -1), attn.o_proj.weight, state, conv_weight, skips, width
++            )
++            residuals = [res_all[r : r + 1].reshape(1, 1, -1) for r in range(R)]
++            conv.after[ai] = [st_all[r : r + 1] for r in range(R)]
++            conv[ai] = conv.after[ai][-1]
++        moe_inputs = []
++        for r, row in enumerate(rows):
++            x, blocks = row["x"], row["blocks"]
++            if residuals is None:
++                state, conv_weight, skip, width = layer._tail_args(x, conv, None)
++                residual, conv[ai] = o_proj_tail(
++                    out[r].reshape(1, 1, -1), None, attn.o_proj.weight, state, conv_weight,
++                    skip, width,
++                )
++                conv.record(ai)
++            else:
++                residual = residuals[r]
++            row["residual"] = residual
++            if layer.is_block_boundary:
++                blocks.append(x)
++            if messages is None:
++                moe_input = layer.mlp_input.normed(
++                    blocks, residual, layer.post_attention_layernorm, dtype
++                )
++                if moe_input is None:
++                    hidden = layer.mlp_input(blocks, residual)[..., 0, :]
++                    moe_input = L._norm_cast(layer.post_attention_layernorm, hidden, dtype)
++            else:
++                hidden = layer.mlp_input(blocks, residual)[..., 0, :]
++                hidden = layer.mlp_message_gate(hidden, messages[r][..., 3, :])
++                moe_input = L._norm_cast(layer.post_attention_layernorm, hidden, dtype)
++            moe_inputs.append(moe_input)
++        if _MOE_M:
++            from . import moe_kernels
++            from .kernels import router_scores
++            from .verify_kernels import moe_rows
++
++            moe = layer.mlp
++            if not moe_kernels.supported(moe, moe_inputs[0]):
++                raise RuntimeError("exact verify: fused MoE unavailable")
++            routed = [
++                router_scores(mi_, moe.gate_weight, moe.e_score_correction_bias)
++                for mi_ in moe_inputs
++            ]
++            sconv = layer.mlp_sconv
++            outs, st = moe_rows(
++                mx.concatenate([v.reshape(1, -1) for v in moe_inputs]),
++                mx.concatenate([nr.reshape(1, -1) for _, nr in routed]),
++                mx.concatenate([sc.reshape(1, -1) for sc, _ in routed]),
++                moe, conv[mi], sconv.conv.weight,
++                mx.concatenate([row["residual"].reshape(1, -1) for row in rows]),
++                sconv.kernel_size,
++            )
++            for r, row in enumerate(rows):
++                row["x"] = outs[r : r + 1].reshape(1, 1, -1)
++            conv.after[mi] = [st[r : r + 1] for r in range(R)]
++            conv[mi] = conv.after[mi][-1]
++        else:
++            for r, row in enumerate(rows):
++                row["x"] = layer._mlp_tail(moe_inputs[r], row["residual"], conv, None, dtype)
++                conv.record(mi)
++        for row in rows:
++            row.pop("residual", None)
++        return new_kv
++
++    # ------------------------------------------------------------------
++    # Batched rows (_BATCHED): the rows travel as (R, D) arrays and every
++    # per-position decode kernel runs once for all rows (verify_kernels' *_rows
++    # variants: the decode kernel per row, the row picked by grid z); MLX ops
++    # whose result does not depend on the row count (elementwise, rms_norm,
++    # the k=16 rel matmul) run batched; the GEMVs MLX dispatches differently
++    # for more rows (sink_proj, the dynamic conv weights) stay per row.
++    def _visit_batched(self, layer, x, blocks, kv_state, conv0, kind, offset, idx, messages):
++        from . import language as L
++        from .kernels import l2_clip_rows, rms_norm_cast
++        from .verify_kernels import (
++            attn_res_multi_rows, attn_res_q1_norm_rows, attn_res_q1_rows, conv_rows,
++            gemv_m, global_rows, global_rows_shared2, message_gates_rows, moe_rows,
++            o_proj_tail_m, router_rows, sliding_rows,
++        )
++
++        R, D = x.shape
++        attn = layer.self_attn
++        cfg = attn.config
++        dtype = x.dtype
++        res_scale = D**-0.5
++        if messages is None:
++            if layer.is_sliding:
++                if layer.attention_input is not None:
++                    xin = attn_res_q1_norm_rows(
++                        blocks + [x], layer.attention_input.query, res_scale,
++                        layer.input_layernorm.weight, layer.input_layernorm.eps, dtype,
++                    )
++                else:
++                    xin = L._norm_cast(layer.input_layernorm, x, dtype)
++                qin = kin = vin = xin
++            else:
++                mixed = attn_res_multi_rows(blocks + [x], layer.attention_input.query, res_scale)
++                qin, kin, vin = (
++                    rms_norm_cast(mx.contiguous(mixed[:, i, :]), norm.weight, norm.eps, dtype)
++                    for i, norm in enumerate(
++                        (layer.q_input_layernorm, layer.k_input_layernorm, layer.v_input_layernorm)
++                    )
++                )
++        else:
++            from ..inkling2_loop.language import _MSG_COMBINE
++
++            if layer.is_sliding:
++                shared = attn_res_q1_rows(blocks + [x], layer.attention_input.query, res_scale)
++                ps = (shared, shared, shared)
++            else:
++                mixed = attn_res_multi_rows(blocks + [x], layer.attention_input.query, res_scale)
++                ps = tuple(mx.contiguous(mixed[:, i, :]) for i in range(3))
++            down, forget_w, gain_w = layer.__dict__["_qkv_gate_stack"]
++            gated = message_gates_rows(
++                list(ps), [mx.contiguous(messages[:, i, :]) for i in range(3)],
++                down, forget_w, gain_w, layer.q_message_gate.eps, combine=_MSG_COMBINE,
++            )
++            if layer.is_sliding:
++                nrm = rms_norm_cast(gated, layer.input_layernorm.weight,
++                                    layer.input_layernorm.eps, dtype)
++                qin, kin, vin = (mx.contiguous(nrm[:, i, :]) for i in range(3))
++            else:
++                qin, kin, vin = (
++                    rms_norm_cast(mx.contiguous(gated[:, i, :]), norm.weight, norm.eps, dtype)
++                    for i, norm in enumerate(
++                        (layer.q_input_layernorm, layer.k_input_layernorm, layer.v_input_layernorm)
++                    )
++                )
++        # projections (each weight read once)
++        fused = attn.__dict__["_fused_qrgkv"]
++        widths = [attn[n].weight.shape[0] for n in ("q_proj", "r_proj", "gate_proj", "k_proj")]
++        cuts = [sum(widths[: i + 1]) for i in range(4)]
++        if qin is kin and qin is vin:
++            y = gemv_m(qin, fused)
++            q, r, g, k, v = (y[:, a:b] for a, b in zip([0] + cuts, cuts + [y.shape[1]]))
++        else:
++            y = gemv_m(qin, fused[: cuts[2]])
++            q, r, g = (y[:, a:b] for a, b in zip([0] + cuts[:2], cuts[:2] + [cuts[2]]))
++            k = gemv_m(kin, attn.k_proj.weight)
++            v = gemv_m(vin, attn.v_proj.weight)
++        # k / v short convolutions; the state after every row
++        kc, vc = attn.k_sconv.conv_idx, attn.v_sconv.conv_idx
++        after = {}
++        if attn.is_sliding:
++            k, after[kc] = conv_rows(conv0[kc], attn.k_sconv.conv.weight, k, attn.k_sconv.kernel_size)
++            v, after[vc] = conv_rows(conv0[vc], attn.v_sconv.conv.weight, v, attn.v_sconv.kernel_size)
++        else:
++            outs = []
++            for sconv, val, dyn, ci in ((attn.k_sconv, k, kin, kc), (attn.v_sconv, v, vin, vc)):
++                # DynamicShortConvolution.__call__ for the R rows (length R).
++                kk = sconv.kernel_size
++                xf = val.reshape(1, R, -1).astype(mx.float32)
++                context = mx.concatenate([conv0[ci], xf], axis=1)
++                after[ci] = mx.stack([context[0, j + 1 : j + kk] for j in range(R)])
++                dynamic = mx.concatenate(
++                    [sconv.weight_proj(dyn[j : j + 1].reshape(1, 1, -1)) for j in range(R)], axis=1
++                ).astype(mx.float32).reshape(1, R, sconv.num_heads, 1, kk)
++                weights = sconv.static_weight.T.reshape(sconv.num_heads, -1, kk) + dynamic
++                out = mx.zeros_like(xf).reshape(1, R, sconv.num_heads, -1)
++                for lag in range(kk):
++                    values = context[:, kk - 1 - lag : kk - 1 - lag + R].reshape(out.shape)
++                    out = out + values * weights[..., lag]
++                outs.append(
++                    ((out.reshape(xf.shape) + xf) / __import__("math").sqrt(2 * kk + 1)).astype(val.dtype)
++                )
++            k, v = (o.reshape(R, -1) for o in outs)
++        H, HKV, HD = attn.n_heads, attn.n_kv, attn.head_dim
++        q = l2_clip_rows(q.reshape(1, R, H, HD), cfg.qk_l2_clip_threshold, attn.q_scale)
++        k = l2_clip_rows(k.reshape(1, R, HKV, HD), cfg.qk_l2_clip_threshold)
++        v = rms_norm_cast(v.reshape(1, R, HKV, HD), None, cfg.rms_norm_eps, dtype)
++        r = l2_clip_rows(r.reshape(1, R, H, cfg.d_rel), cfg.rel_l2_clip_threshold, attn.rel_scale)
++        if not attn.is_sliding and cfg.log_scaling_n_floor is not None:
++            positions = (mx.arange(R, dtype=mx.int32) + offset).reshape(1, R) + 1
++            tau = 1 + cfg.log_scaling_alpha * mx.log(
++                mx.maximum(positions / cfg.log_scaling_n_floor, 1)
++            )
++            q = (q.astype(mx.float32) * tau[..., None, None]).astype(dtype)
++            r = (r.astype(mx.float32) * tau[..., None, None]).astype(dtype)
++        if _REL_BATCHED:
++            rel = (r.reshape(R * H, cfg.d_rel) @ attn.rel_proj.astype(dtype)).reshape(R, H, -1)
++        else:
++            rel = mx.stack([r[0, j] @ attn.rel_proj.astype(dtype) for j in range(R)])
++        sinks = mx.stack([attn.sink_proj(qin[j : j + 1].reshape(1, 1, -1))[0, 0] for j in range(R)])
++        q = q.reshape(R, H, HD)
++        k_new = k.reshape(R, HKV, HD)
++        v_new = v.reshape(R, HKV, HD)
++        keys, values = kv_state
++        scale = HD**-0.5
++        if kind == "g":
++            if _GLOBAL_KERNEL == "rows" or (_GLOBAL_KERNEL == "auto" and R > 4):
++                out = global_rows(q, keys, values, k_new, v_new, offset, rel, sinks, g,
++                                  scale=scale)
++            else:
++                out = global_rows_shared2(q, keys, values, k_new, v_new, offset, rel, sinks, g,
++                                          scale=scale, rps=_GLOBAL_RPS,
++                                          desc=_GLOBAL_LANE == "desc")
++        else:
++            s0 = mx.where(idx == keys.shape[2], 0, idx)
++            out = sliding_rows(q, keys, values, k_new, v_new, s0, rel, sinks.astype(dtype), g,
++                               scale=scale, blocks=L._SLIDING_BLOCKS)
++        # attention tails
++        ac, mc = layer.attn_sconv.conv_idx, layer.mlp_sconv.conv_idx
++        sconv = layer.attn_sconv
++        residual, after[ac] = o_proj_tail_m(
++            out.reshape(R, -1), attn.o_proj.weight, conv0[ac], sconv.conv.weight,
++            None if layer.is_block_boundary else x, sconv.kernel_size,
++        )
++        if layer.is_block_boundary:
++            blocks.append(x)
++        if messages is None:
++            moe_input = attn_res_q1_norm_rows(
++                blocks + [residual], layer.mlp_input.query, res_scale,
++                layer.post_attention_layernorm.weight, layer.post_attention_layernorm.eps, dtype,
++            )
++        else:
++            from ..inkling2_loop.language import _MSG_COMBINE
++
++            hidden = attn_res_q1_rows(blocks + [residual], layer.mlp_input.query, res_scale)
++            gate = layer.mlp_message_gate
++            hidden = message_gates_rows(
++                [hidden], [mx.contiguous(messages[:, 3, :])], gate.down_proj.weight[None],
++                gate.forget_gate_proj.weight[None], gate.message_gate_proj.weight[None],
++                gate.eps, combine=_MSG_COMBINE,
++            ).reshape(R, -1)
++            moe_input = rms_norm_cast(hidden, layer.post_attention_layernorm.weight,
++                                      layer.post_attention_layernorm.eps, dtype)
++        moe = layer.mlp
++        scores, neg = router_rows(moe_input, moe.gate_weight, moe.e_score_correction_bias)
++        msc = layer.mlp_sconv
++        x_out, after[mc] = moe_rows(
++            moe_input, neg, scores, moe, conv0[mc], msc.conv.weight, residual, msc.kernel_size
++        )
++        return x_out, (k_new, v_new), after
++
++    def _step_batched(self, tokens, offset, idx, *states):
++        lm = self.lm
++        tm = lm.model
++        cfg = tm.config
++        R = self.block
++        requested = set(self.capture_layer_ids)
++        x = tm.embed(tokens).reshape(R, -1)
++        blocks = []
++        captures = {}
++        start = cfg.loop_layer_index_start
++        pre_loop = previous = None
++        per_cache = {}
++        from .verify_kernels import attn_res_multi_rows, attn_res_q1_rows
++
++        for step, (i, cache_idx, p) in enumerate(tm.schedule()):
++            layer = tm.layers[i]
++            if i == start:
++                if p == 0:
++                    pre_loop = (x, list(blocks))
++                else:
++                    previous = (blocks[len(pre_loop[1]) + 1 :], x)
++                    x, blocks = pre_loop[0], list(pre_loop[1])
++            if step in requested:
++                captures[step] = x
++            kind = self.kinds[cache_idx]
++            keys, values, c0, c1, c2, c3 = states[6 * cache_idx : 6 * cache_idx + 6]
++            messages = None
++            if p > 0:
++                mi = tm.message_input
++                query = mi.query[i - start : i - start + 1].reshape(mi.query.shape[1:])
++                messages = attn_res_multi_rows(
++                    list(previous[0]) + [previous[1]], query, previous[1].shape[-1] ** -0.5
++                )
++            x, kv_new, after = self._visit_batched(
++                layer, x, blocks, (keys, values), (c0, c1, c2, c3), kind, offset, idx, messages
++            )
++            per_cache[cache_idx] = (kv_new, [
++                mx.concatenate([(c0, c1, c2, c3)[j], after[j].reshape(R, *after[j].shape[-2:])])
++                .reshape(R + 1, 1, *after[j].shape[-2:])
++                for j in range(4)
++            ])
++        total = cfg.total_num_hidden_layers
++        h = attn_res_q1_rows(blocks + [x], tm.final_input.query, x.shape[-1] ** -0.5)
++        if total in requested:
++            captures[total] = tm.norm(h).astype(x.dtype)
++        from .kernels import head_logits
++
++        hn = lm.model.norm(h).astype(tm.embed_norm.weight.dtype).astype(mx.float32)
++        logits = head_logits(hn, lm.lm_head.weight).reshape(R, 1, -1)
++        cap = lm.config.final_logit_softcapping
++        if cap:
++            logits = mx.tanh(logits / cap) * cap
++        logits = logits[..., : lm.config.unpadded_vocab_size][:, -1, :]
++        logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
++        target = mx.argmax(logprobs, axis=-1).reshape(1, R)
++        captured = [captures[c].reshape(1, R, -1) for c in self.capture_layer_ids]
++        out = [target, logprobs, *captured]
++        for cache_idx in range(len(self.kinds)):
++            (k_new, v_new), convs = per_cache[cache_idx]
++            out += [k_new, v_new, *convs]
++        return tuple(out)
++
++    # ------------------------------------------------------------------
++    def _step(self, tokens, offset, idx, *states):
++        lm = self.lm
++        tm = lm.model
++        cfg = tm.config
++        R = self.block
++        requested = set(self.capture_layer_ids)
++        x_all = tm.embed(tokens)  # (1, R, hidden): per-row Embedding + RMSNorm
++        rows = [{"x": x_all[:, r : r + 1], "blocks": []} for r in range(R)]
++        captures = {}
++        convs, kv_out = [], []
++        n = 0
++        start = cfg.loop_layer_index_start
++        pre_loop, previous = [None] * R, [None] * R
++        for step, (i, cache_idx, p) in enumerate(tm.schedule()):
++            layer = tm.layers[i]
++            if i == start:
++                for r, row in enumerate(rows):
++                    if p == 0:
++                        pre_loop[r] = (row["x"], list(row["blocks"]))
++                    else:
++                        previous[r] = (row["blocks"][len(pre_loop[r][1]) + 1 :], row["x"])
++                        row["x"], row["blocks"] = pre_loop[r][0], list(pre_loop[r][1])
++            if step in requested:
++                captures[step] = [row["x"] for row in rows]
++            kind = self.kinds[cache_idx]
++            keys, values, c0, c1, c2, c3 = states[6 * cache_idx : 6 * cache_idx + 6]
++            conv = _RowConv((c0, c1, c2, c3))
++            messages = None
++            if p > 0:
++                messages = [
++                    tm.message_input(previous[r][0], previous[r][1], i - start)
++                    for r in range(R)
++                ]
++            new_kv = self._visit(layer, rows, (keys, values), conv, kind, offset, idx, messages)
++            convs.append((cache_idx, conv))
++            kv_out.append((cache_idx, new_kv))
++        total = cfg.total_num_hidden_layers
++        heads = []
++        normalized = []
++        for row in rows:
++            h = tm.final_input(row["blocks"], row["x"])[..., 0, :]
++            normalized.append(tm.norm(h).astype(row["x"].dtype))
++            heads.append(h)
++        if total in requested:
++            captures[total] = normalized
++        ys, lps = [], []
++        if _HEAD_M:
++            # LanguageModel._logits_from_norm with the head GEMV of all rows in
++            # one kernels.head_logits call (its rows are independent: same
++            # per-row arithmetic for any M); the rest per row as before.
++            from .kernels import head_logits
++
++            hs = [
++                lm.model.norm(h).astype(tm.embed_norm.weight.dtype).astype(mx.float32)
++                for h in heads
++            ]
++            all_logits = head_logits(
++                mx.concatenate([x.reshape(1, -1) for x in hs]), lm.lm_head.weight
++            )
++            cap = lm.config.final_logit_softcapping
++            for r in range(R):
++                logits = all_logits[r : r + 1].reshape(1, 1, -1)
++                if cap:
++                    logits = mx.tanh(logits / cap) * cap
++                logits = logits[..., : lm.config.unpadded_vocab_size][:, -1, :]
++                logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
++                ys.append(mx.argmax(logprobs, axis=-1))
++                lps.append(logprobs)
++        else:
++            for h in heads:
++                # LanguageModel.__call__ (skip_final_norm) + fast_decode's step.
++                logits = lm._logits_from_norm(lm.model.norm(h))[:, -1, :]
++                logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
++                ys.append(mx.argmax(logprobs, axis=-1))
++                lps.append(logprobs)
++        target = mx.concatenate(ys).reshape(1, R)
++        logprobs = mx.concatenate(lps)
++        captured = [
++            mx.concatenate(captures[c], axis=1) for c in self.capture_layer_ids
++        ]
++        # Per cache entry: K rows, V rows, then for each conv index the R + 1
++        # states (initial, after row 0, ..., after row R - 1).
++        out = [target, logprobs, *captured]
++        conv_by_idx = dict(convs)
++        kv_by_idx = dict(kv_out)
++        for cache_idx in range(len(self.kinds)):
++            k_new, v_new = kv_by_idx[cache_idx]
++            out += [k_new, v_new]
++            conv = conv_by_idx[cache_idx]
++            for j in range(4):
++                if len(conv.after[j]) != R:
++                    raise RuntimeError("exact verify: conv state records")
++                out.append(mx.stack([states[6 * cache_idx + 2 + j], *conv.after[j]]))
++        return tuple(out)
++
++    def __call__(self, tokens, cache):
++        from .fast_verify import _layout
++
++        layout = _layout(cache, self.block)
++        if layout is None or tokens.shape != (1, self.block):
++            return None
++        kinds, offset, idx = layout
++        from .language import _DECODE_KERNEL_MIN_KEYS
++
++        if offset + 1 < _DECODE_KERNEL_MIN_KEYS:
++            return None
++        if self.kinds is None:
++            self.kinds = kinds
++        elif self.kinds != kinds:
++            return None
++        states = []
++        for entry in cache:
++            kv, conv = entry.caches
++            states.extend((kv.keys, kv.values, *conv.cache))
++        outs = self.fn(
++            tokens,
++            mx.array(offset, dtype=mx.int32),
++            mx.array(idx, dtype=mx.int32),
++            *states,
++        )
++        del states
++        nc = len(self.capture_layer_ids)
++        target, logprobs = outs[0], outs[1]
++        captured = list(outs[2 : 2 + nc])
++        flat = outs[2 + nc :]
++        per = [flat[6 * i : 6 * i + 6] for i in range(len(kinds))]
++        self.last_logprobs = logprobs
++        txn = ExactVerifyTransaction(cache, self.block, kinds, per)
++        txn.logprobs = logprobs
++        return captured, txn, target
++
++
++class ExactVerifyTransaction:
++    def __init__(self, cache, block, kinds, per):
++        self.cache, self.block, self.kinds, self.per = cache, block, kinds, per
++        self.active = True
++
++    def commit(self, lengths):
++        if not self.active:
++            raise RuntimeError("exact verifier transaction is no longer active")
++        if len(lengths) != 1:
++            raise ValueError("exact Inkling2 verifier supports batch size one")
++        keep = int(lengths[0])
++        if not 1 <= keep <= self.block:
++            raise ValueError("invalid exact verifier commit length")
++        for entry, kind, part in zip(self.cache, self.kinds, self.per):
++            kv, conv = entry.caches
++            k_new, v_new = part[0][:keep], part[1][:keep]
++            # (keep, HKV, D) -> (1, HKV, keep, D)
++            k_new = k_new.transpose(1, 0, 2)[None]
++            v_new = v_new.transpose(1, 0, 2)[None]
++            if kind == "g":
++                start = mx.array([kv.offset], dtype=mx.int32)
++                keys, values = kv.keys, kv.values
++                kv.keys = kv.values = None
++                kv.keys = mx.slice_update(keys, k_new, start, axes=(2,))
++                kv.values = mx.slice_update(values, v_new, start, axes=(2,))
++                del keys, values
++                kv.offset += keep
++            else:
++                # RotatingKVCache._update_in_place on a full ring, row after
++                # row, as at most two slice writes (the same slots and state).
++                done = 0
++                while done < keep:
++                    if kv._idx == kv.max_size:
++                        kv._idx = kv.keep
++                    take = min(keep - done, kv.max_size - kv._idx)
++                    kv.keys[..., kv._idx : kv._idx + take, :] = k_new[..., done : done + take, :]
++                    kv.values[..., kv._idx : kv._idx + take, :] = v_new[..., done : done + take, :]
++                    kv.offset += take
++                    kv._idx += take
++                    done += take
++            for j in range(4):
++                conv.cache[j] = part[2 + j][keep]
++        self.active = False
++
++    def abort(self):
++        self.active = False
++
++
++class SequentialExactVerify:
++    """A verify block decoded token by token through the model's own
++    single-token decode path (exactly ar.generate_step's eager step), stopping
++    at the first token that differs from the block's next input. Used in exact
++    mode where the k-row verifier cannot serve (fewer keys than the compiled
++    decode step needs, or no reserved room). Rows not evaluated report -1."""
++
++    def __init__(self, cache, processed, logprobs):
++        self.cache, self.processed, self.logprobs = cache, processed, logprobs
++        self.active = True
++
++    def commit(self, lengths):
++        if int(lengths[0]) != self.processed:
++            raise RuntimeError("sequential exact verify: commit length mismatch")
++        self.active = False
++
++    def abort(self):
++        self.active = False
++
++
++def sequential_verify(lm, tokens, cache, capture_layer_ids):
++    k = tokens.shape[1]
++    toks = tokens.reshape(-1).tolist()
++    targets, lps, caps = [], [], []
++    for i in range(k):
++        out = lm(
++            mx.array([[toks[i]]], dtype=tokens.dtype),
++            cache=cache,
++            capture_layer_ids=list(capture_layer_ids),
++            logits_to_keep=1,
++        )
++        logits = out.logits[:, -1, :]
++        logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
++        y = mx.argmax(logprobs, axis=-1)
++        caps.append(out.hidden_states)
++        lps.append(logprobs)
++        t = int(y.item())
++        targets.append(t)
++        if i + 1 >= k or t != toks[i + 1]:
++            break
++    n = len(targets)
++    target = mx.array([targets + [-1] * (k - n)], dtype=mx.int32)
++    captured = [mx.concatenate([c[j] for c in caps], axis=1) for j in range(len(caps[0]))]
++    return captured, SequentialExactVerify(cache, n, mx.concatenate(lps)), target
++
++
++def exact_verify(lm, tokens, cache, capture_layer_ids):
++    if not _ENABLED or tokens.shape[0] != 1 or not _flags_ok():
++        return None
++    key = (tokens.shape[1], tuple(capture_layer_ids))
++    verifiers = lm.__dict__.setdefault("_exact_speculative_verifiers", {})
++    verifier = verifiers.get(key)
++    if verifier is None:
++        verifier = ExactVerifier(lm, *key)
++        verifiers[key] = verifier
++    return verifier(tokens, cache)
+diff -ruN a/mlx_vlm/models/inkling2/fast_verify.py b/mlx_vlm/models/inkling2/fast_verify.py
+--- a/mlx_vlm/models/inkling2/fast_verify.py
++++ b/mlx_vlm/models/inkling2/fast_verify.py
+@@ -0,0 +1,200 @@
++"""Fixed-k compiled exact-greedy verifier for Inkling2 DSpark."""
++
++import os
++
++import mlx.core as mx
++
++from ..cache import ArraysCache, CacheList, KVCache, RotatingKVCache
++from .step_cache import VerifyConvCache, VerifyKVCache, VerifyRotatingKVCache
++
++
++_ENABLED = os.environ.get("MLX_VLM_INKLING2_COMPILED_VERIFY", "0") == "1"
++
++
++def _commit_ring(cache, keys, values, keep):
++    for position in range(keep):
++        cache.update_and_fetch(
++            keys[..., position : position + 1, :],
++            values[..., position : position + 1, :],
++        )
++
++
++def _layout(cache, block):
++    kinds, offset, idx = [], None, None
++    for entry in cache:
++        if type(entry) is not CacheList or len(entry.caches) != 2:
++            return None
++        kv, conv = entry.caches
++        if type(conv) is not ArraysCache or any(
++            getattr(conv, name, None) is not None for name in ("left_padding", "lengths")
++        ):
++            return None
++        if any(state is None for state in conv.cache):
++            return None
++        if type(kv) is KVCache:
++            if kv.keys is None or kv.offset + block > kv.keys.shape[2]:
++                return None
++            offset = kv.offset if offset is None else offset
++            if kv.offset != offset:
++                return None
++            kinds.append("g")
++        elif type(kv) is RotatingKVCache:
++            if (
++                kv.keys is None
++                or kv.keep != 0
++                or kv.offset < kv.max_size
++                or kv.keys.shape[2] != kv.max_size
++            ):
++                return None
++            idx = kv._idx if idx is None else idx
++            if kv._idx != idx:
++                return None
++            kinds.append("r")
++        else:
++            return None
++    return (tuple(kinds), offset, idx) if offset is not None and idx is not None else None
++
++
++class CompiledVerifyTransaction:
++    def __init__(self, cache, block, kinds, outputs):
++        self.cache = cache
++        self.block = block
++        self.kinds = kinds
++        self.outputs = outputs
++        self.active = True
++
++    def commit(self, lengths):
++        if not self.active:
++            raise RuntimeError("compiled verifier transaction is no longer active")
++        if len(lengths) != 1:
++            raise ValueError("compiled Inkling2 verifier supports batch size one")
++        keep = int(lengths[0])
++        if not 0 <= keep <= self.block:
++            raise ValueError("invalid compiled verifier commit length")
++        for entry, kind, state in zip(self.cache, self.kinds, self.outputs):
++            kv, conv = entry.caches
++            keys, values, windows = state
++            if kind == "g":
++                # The compiled graph already wrote all k rows beyond the old
++                # offset. Rejected rows are unreachable and will be overwritten.
++                kv.keys, kv.values = keys, values
++                kv.offset += keep
++            else:
++                # Keep the serving cache as a fixed 1024-slot ring. This avoids
++                # the native block path's variable 1023+keep temporary layout.
++                _commit_ring(kv, keys, values, keep)
++            for index, (source, width) in enumerate(windows):
++                conv.cache[index] = mx.contiguous(source[:, keep : keep + width])
++        self.active = False
++
++    def abort(self):
++        # Global outputs contain the original prefix plus unreachable speculative
++        # rows. Restoring them at the old offset is a valid abort state.
++        if not self.active:
++            return
++        for entry, kind, state in zip(self.cache, self.kinds, self.outputs):
++            if kind == "g":
++                entry.caches[0].keys, entry.caches[0].values = state[:2]
++        self.active = False
++
++
++class CompiledVerifier:
++    def __init__(self, lm, block, capture_layer_ids):
++        from .fast_decode import prepare_decode
++
++        prepare_decode(lm)
++        self.lm = lm
++        self.block = int(block)
++        self.capture_layer_ids = tuple(capture_layer_ids)
++        self.kinds = None
++        self.fn = mx.compile(self._step)
++
++    def _step(self, tokens, offset, idx, *states):
++        caches, n = [], 0
++        for kind in self.kinds:
++            keys, values, c0, c1, c2, c3 = states[n : n + 6]
++            n += 6
++            kv = (
++                VerifyKVCache(keys, values, offset)
++                if kind == "g"
++                else VerifyRotatingKVCache(keys, values, idx, keys.shape[2])
++            )
++            caches.append((kv, VerifyConvCache((c0, c1, c2, c3))))
++
++        out = self.lm(
++            tokens,
++            cache=caches,
++            capture_layer_ids=self.capture_layer_ids,
++        )
++        target_tokens = mx.argmax(out.logits, axis=-1)
++        new = []
++        for kv, conv in caches:
++            keys, values = (
++                (kv.keys, kv.values)
++                if isinstance(kv, VerifyKVCache)
++                else (kv.new_keys, kv.new_values)
++            )
++            windows = []
++            for index in range(4):
++                source, width = conv.records[index]
++                if source.shape[1] - self.block != width:
++                    raise ValueError("unexpected compiled convolution window width")
++                windows.append(source)
++            new.extend((keys, values, *windows))
++        return (target_tokens, *out.hidden_states, *new)
++
++    def __call__(self, tokens, cache):
++        layout = _layout(cache, self.block)
++        if layout is None or tokens.shape != (1, self.block):
++            return None
++        kinds, offset, idx = layout
++        if self.kinds is None:
++            self.kinds = kinds
++        elif self.kinds != kinds:
++            return None
++
++        states = []
++        for entry, kind in zip(cache, kinds):
++            kv, conv = entry.caches
++            states.extend((kv.keys, kv.values, *conv.cache))
++            if kind == "g":
++                kv.keys = kv.values = None
++        outputs = self.fn(
++            tokens,
++            mx.array(offset, dtype=mx.int32),
++            mx.array(idx, dtype=mx.int32),
++            *states,
++        )
++        del states
++        capture_count = len(self.capture_layer_ids)
++        target_tokens = outputs[0]
++        captured = list(outputs[1 : 1 + capture_count])
++        flat = outputs[1 + capture_count :]
++        transaction_states = []
++        stride = 6  # K, V and four convolution window sources.
++        for entry, kind, start in zip(cache, kinds, range(0, len(flat), stride)):
++            part = flat[start : start + stride]
++            keys, values = part[:2]
++            windows = [
++                (part[2 + index], part[2 + index].shape[1] - self.block)
++                for index in range(4)
++            ]
++            transaction_states.append((keys, values, windows))
++            if kind == "g":
++                entry.caches[0].keys, entry.caches[0].values = keys, values
++        transaction = CompiledVerifyTransaction(
++            cache, self.block, kinds, transaction_states
++        )
++        return captured, transaction, target_tokens
++
++
++def compiled_verify(lm, tokens, cache, capture_layer_ids):
++    if not _ENABLED or tokens.shape[0] != 1:
++        return None
++    key = (tokens.shape[1], tuple(capture_layer_ids))
++    verifiers = lm.__dict__.setdefault("_compiled_speculative_verifiers", {})
++    verifier = verifiers.get(key)
++    if verifier is None:
++        verifier = CompiledVerifier(lm, *key)
++        verifiers[key] = verifier
++    return verifier(tokens, cache)
+diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
+--- a/mlx_vlm/models/inkling2/kernels.py
++++ b/mlx_vlm/models/inkling2/kernels.py
+@@ -365,19 +365,7 @@
+     )[0]
+ 
+ 
+-@lru_cache(maxsize=1)
+-def _router_scores():
+-    # The router of one token: x.astype(f32) @ W.T as MLX's GEMV dispatches it
+-    # for K >= 16 N (8 simdgroups split K, TN = 4 per lane, TM = 4 rows per
+-    # threadgroup, simd_shuffle_down tree, sequential threadgroup sum), then
+-    # MLX's sigmoid and -(scores + bias), in one kernel.
+-    return mx.fast.metal_kernel(
+-        name="inkling2_router_scores",
+-        input_names=["x", "w", "bias"],
+-        output_names=["scores", "neg"],
+-        ensure_row_contiguous=True,
+-        compile_options={"math_mode": "safe"},
+-        source=r"""
++_ROUTER_SCORES_SRC = r"""
+         constexpr int BN = 8, TM = 4, TN = 4, blockN = BN * 32 * TN;
+         threadgroup float tgp_memory[BN * (TM + TM)];
+         const uint lane = thread_index_in_simdgroup;
+@@ -424,7 +412,22 @@
+                 }
+             }
+         }
+-        """,
++        """
++
++
++@lru_cache(maxsize=1)
++def _router_scores():
++    # The router of one token: x.astype(f32) @ W.T as MLX's GEMV dispatches it
++    # for K >= 16 N (8 simdgroups split K, TN = 4 per lane, TM = 4 rows per
++    # threadgroup, simd_shuffle_down tree, sequential threadgroup sum), then
++    # MLX's sigmoid and -(scores + bias), in one kernel.
++    return mx.fast.metal_kernel(
++        name="inkling2_router_scores",
++        input_names=["x", "w", "bias"],
++        output_names=["scores", "neg"],
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=_ROUTER_SCORES_SRC,
+     )
+ 
+ 
+@@ -859,6 +862,16 @@
+ 
+ @lru_cache(maxsize=1)
+ def _attention_residual_q1_list_norm():
++    return mx.fast.metal_kernel(
++        name="inkling2_attention_residual_q1_list_norm",
++        input_names=["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "query", "scale", "nw", "eps"],
++        output_names=["normed", "keys"],
++        compile_options={"math_mode": "safe"},
++        source=_q1_list_norm_source(),
++    )
++
++
++def _q1_list_norm_source():
+     # attention_residual_q1_list, then rms_norm_cast (weight HAS_W, output O)
+     # on its FP32 output in the same threadgroup: thread t < D/4 holds output
+     # elements 4t..4t+3, exactly the elements rms_single_row gives thread t.
+@@ -902,13 +915,7 @@
+         "for (int k = 0; k < 4; ++k) {\n            const float wk",
+         "for (int k = 0; k < 4 && active; ++k) {\n            const float wk",
+     )
+-    return mx.fast.metal_kernel(
+-        name="inkling2_attention_residual_q1_list_norm",
+-        input_names=["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "query", "scale", "nw", "eps"],
+-        output_names=["normed", "keys"],
+-        compile_options={"math_mode": "safe"},
+-        source=head + tail,
+-    )
++    return head + tail
+ 
+ 
+ def attention_residual_q1_list_norm(states, query, scale, weight, eps, dtype):
+@@ -1164,14 +1171,7 @@
+ _DECODE_SIMDGROUPS = 8
+ 
+ 
+-@lru_cache(maxsize=1)
+-def _decode_partials():
+-    return mx.fast.metal_kernel(
+-        name="inkling2_decode_attention_partials",
+-        input_names=["q", "k", "v", "rel", "key_start", "sizes", "scale", "k_new", "v_new"],
+-        output_names=["part_max", "part_sum", "part_acc"],
+-        ensure_row_contiguous=False,
+-        source=r"""
++_DECODE_PARTIALS_SRC = r"""
+         constexpr int G = HQ / HKV;
+         constexpr int E = D / 32;
+         const uint lane = thread_index_in_simdgroup;
+@@ -1272,7 +1272,17 @@
+                 part_sum[row] = L;
+             }
+         }
+-        """,
++        """
++
++
++@lru_cache(maxsize=1)
++def _decode_partials():
++    return mx.fast.metal_kernel(
++        name="inkling2_decode_attention_partials",
++        input_names=["q", "k", "v", "rel", "key_start", "sizes", "scale", "k_new", "v_new"],
++        output_names=["part_max", "part_sum", "part_acc"],
++        ensure_row_contiguous=False,
++        source=_DECODE_PARTIALS_SRC,
+     )
+ 
+ 
+@@ -1300,19 +1310,7 @@
+     )
+ 
+ 
+-@lru_cache(maxsize=1)
+-def _decode_combine2():
+-    # _decode_combine's arithmetic with its latency removed: the maximum over
+-    # the blocks as a parallel reduction (max is exact in any order), each
+-    # block's weight exp(part_max - M) computed once into threadgroup memory,
+-    # then the same sequential sums over the blocks (L += part_sum * w,
+-    # A += part_acc * w) with the part_acc loads issued in batches.
+-    # Same (default) compile options as _decode_combine.
+-    return mx.fast.metal_kernel(
+-        name="inkling2_decode_attention_combine2",
+-        input_names=["part_max", "part_sum", "part_acc", "sinks", "sizes", "gate"],
+-        output_names=["out"],
+-        source=r"""
++_DECODE_COMBINE2_SRC = r"""
+         const int h = threadgroup_position_in_grid.x / (D / DT);
+         const int lid = thread_position_in_threadgroup.x;
+         const int d = (threadgroup_position_in_grid.x % (D / DT)) * DT + lid;
+@@ -1357,7 +1355,22 @@
+         } else {
+             out[h * D + d] = T(A / L);
+         }
+-        """,
++        """
++
++
++@lru_cache(maxsize=1)
++def _decode_combine2():
++    # _decode_combine's arithmetic with its latency removed: the maximum over
++    # the blocks as a parallel reduction (max is exact in any order), each
++    # block's weight exp(part_max - M) computed once into threadgroup memory,
++    # then the same sequential sums over the blocks (L += part_sum * w,
++    # A += part_acc * w) with the part_acc loads issued in batches.
++    # Same (default) compile options as _decode_combine.
++    return mx.fast.metal_kernel(
++        name="inkling2_decode_attention_combine2",
++        input_names=["part_max", "part_sum", "part_acc", "sinks", "sizes", "gate"],
++        output_names=["out"],
++        source=_DECODE_COMBINE2_SRC,
+     )
+ 
+ 
+@@ -1504,6 +1517,7 @@
+     const uint sg = simdgroup_index_in_threadgroup;
+     const uint lane = thread_index_in_simdgroup;
+     const int batch = threadgroup_position_in_grid.z;
++    const int E = key_end[batch];
+     constexpr int G = HQ / HKV;
+     constexpr int QSG = BQ / 8;
+     const int group = threadgroup_position_in_grid.y;
+@@ -1524,7 +1538,7 @@
+     const short fn = ((lane / 4) & 2) * 2 + (lane % 2) * 2;
+     const int row = q0 + qsg * 8 + fm;
+     const bool row_ok = row < L;
+-    const int diag = S - L + row;
++    const int diag = E - L + row;
+ 
+     // q and k are clipped and v has unit RMS, so half holds them.
+     threadgroup half Ks[D * LDK];
+@@ -1550,8 +1564,8 @@
+     const int bias_row = batch * L + (row_ok ? row : 0);
+     const device T* bias = rel + (size_t(bias_row) * HQ + head) * R;
+ 
+-    const int first_diag = S - L + q0;
+-    const int last_diag = S - L + min(q0 + BQ, L) - 1;
++    const int first_diag = E - L + q0;
++    const int last_diag = E - L + min(q0 + BQ, L) - 1;
+     int first_key = WINDOW > 0 ? max(0, first_diag - WINDOW + 1) : 0;
+     first_key = max(first_key, start);
+     const device T* k_head = k + batch * k_strides[0] + kv_head * k_strides[1];
+@@ -1565,7 +1579,7 @@
+             const int key = k0 + r;
+             vec<T, 4> kv[2] = {vec<T, 4>(0), vec<T, 4>(0)};
+             vec<T, 4> vv[2] = {vec<T, 4>(0), vec<T, 4>(0)};
+-            if (key < S) {
++            if (key < E) {
+                 auto kp = (const device vec<T, 4>*)(k_head + key * k_strides[2] + col);
+                 auto vp = (const device vec<T, 4>*)(v_head + key * v_strides[2] + col);
+                 kv[0] = kp[0];
+@@ -1597,7 +1611,7 @@
+         // beyond the relative-bias band.  Hoist those uniform tile tests out
+         // of the score elements; only the diagonal/band/window boundaries
+         // need the general mask path.
+-        const bool fully_visible = FAST_MASK && k0 >= start && k0 + BK <= S
++        const bool fully_visible = FAST_MASK && k0 >= start && k0 + BK <= E
+             && k0 + BK - 1 <= first_diag
+             && (WINDOW == 0 || last_diag - k0 < WINDOW);
+         const bool beyond_relative = fully_visible
+@@ -1670,9 +1684,184 @@
+     }
+ """
+ 
++# Fixed-k verification needs many key-axis threadgroups, while the prefill
++# kernel above assigns only one threadgroup to a query-head block and walks the
++# entire context serially. Derive a partial kernel from the same score/value
++# loop: one threadgroup handles one key block and all three query heads sharing
++# a KV head. K/V is staged once for all fixed verify rows and heads.
++_VERIFY_ATTENTION_SOURCE = _RELATIVE_ATTENTION_SOURCE
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "    const int q0 = threadgroup_position_in_grid.x * BQ;",
++    "    const int part = threadgroup_position_in_grid.x;\n"
++    "    const int q0 = 0;\n"
++    "    const int part_start = part * BS;\n"
++    "    const int part_end = min(part_start + BS, E);",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "    float row_max = row_ok ? float(sinks[(batch * L + row) * HQ + head]) * LOG2E : 0.0f;\n"
++    "    float row_sum = 1.0f;",
++    "    float row_max = -INFINITY;\n"
++    "    float row_sum = 0.0f;",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "    for (int k0 = first_key / BK * BK; k0 <= last_diag; k0 += BK) {",
++    "    for (int k0 = part_start; k0 < part_end; k0 += BK) {",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "            if (key < E) {",
++    "            if (key < part_end) {",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "        const bool fully_visible = FAST_MASK && k0 >= start && k0 + BK <= E",
++    "        const bool fully_visible = FAST_MASK && k0 >= start && k0 + BK <= part_end",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "        const float factor = fast::exp2(row_max - new_max);",
++    "        const bool has_value = new_max > -INFINITY;\n"
++    "        const float factor = has_value ? fast::exp2(row_max - new_max) : 0.0f;",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    "                const float p = fast::exp2(scores[kb].thread_elements()[e] - new_max);",
++    "                const float p = has_value ? fast::exp2(scores[kb].thread_elements()[e] - new_max) : 0.0f;",
++)
++_VERIFY_ATTENTION_SOURCE = _VERIFY_ATTENTION_SOURCE.replace(
++    """    if (row_ok) {
++        device T* op = out + (size_t(batch * L + row) * HQ + head) * D;
++        for (int db = 0; db < D / 8; ++db) {
++            op[db * 8 + fn] = T(acc[db].thread_elements()[0] / row_sum);
++            op[db * 8 + fn + 1] = T(acc[db].thread_elements()[1] / row_sum);
++        }
++    }
++""",
++    """    if (row_ok) {
++        const size_t state_row = ((size_t(batch) * NB + part) * L + row) * HQ + head;
++        if (fn == 0) {
++            part_max[state_row] = row_max;
++            part_sum[state_row] = row_sum;
++        }
++        device float* op = part_acc + state_row * D;
++        for (int db = 0; db < D / 8; ++db) {
++            op[db * 8 + fn] = acc[db].thread_elements()[0];
++            op[db * 8 + fn + 1] = acc[db].thread_elements()[1];
++        }
++    }
++""",
++)
++
++_verify_attention_partials = mx.fast.metal_kernel(
++    name="inkling2_verify_attention_partials",
++    input_names=["q", "k", "v", "rel", "key_end", "sizes", "scale"],
++    output_names=["part_max", "part_sum", "part_acc"],
++    source=_VERIFY_ATTENTION_SOURCE,
++    ensure_row_contiguous=False,
++    compile_options={"math_mode": _MATH_MODE},
++)
++
++_verify_attention_combine = mx.fast.metal_kernel(
++    name="inkling2_verify_attention_combine",
++    input_names=["part_max", "part_sum", "part_acc", "sinks"],
++    output_names=["out"],
++    source=r"""
++    constexpr float LOG2E = 1.4426950408889634f;
++    const int d = thread_position_in_threadgroup.x;
++    const int rh = threadgroup_position_in_grid.x;
++    const int batch = threadgroup_position_in_grid.z;
++    const int row = rh / HQ;
++    const int head = rh % HQ;
++    const size_t base = (size_t(batch) * NB * L * HQ) + row * HQ + head;
++    float M = float(sinks[(batch * L + row) * HQ + head]) * LOG2E;
++    for (int p = 0; p < NB; ++p) M = max(M, part_max[base + size_t(p) * L * HQ]);
++    float Z = fast::exp2(float(sinks[(batch * L + row) * HQ + head]) * LOG2E - M);
++    float A = 0.0f;
++    for (int p = 0; p < NB; ++p) {
++        const size_t index = base + size_t(p) * L * HQ;
++        const float w = part_max[index] > -INFINITY
++            ? fast::exp2(part_max[index] - M) : 0.0f;
++        Z += part_sum[index] * w;
++        A += part_acc[index * D + d] * w;
++    }
++    out[(size_t(batch * L + row) * HQ + head) * D + d] = T(A / Z);
++    """,
++    ensure_row_contiguous=False,
++    compile_options={"math_mode": _MATH_MODE},
++)
++
++
++def verify_attention_split(q, k, v, rel, sinks, *, scale, length, block=None):
++    """Fixed short-query global attention split over key blocks.
++
++    One partial pass stages each KV block once for all query rows and all three
++    query heads sharing that KV head; a second pass combines online-softmax
++    states with the query-dependent sink.
++    """
++    B, Hq, L, D = q.shape
++    Hkv, S = k.shape[1], k.shape[2]
++    block = (256 if S < 65536 else 512) if block is None else int(block)
++    if B != 1 or not 1 < L <= 8 or Hq // Hkv != 3:
++        raise ValueError("verify_attention_split expects B=1, L=2..8, GQA=3")
++    nblocks = (S + block - 1) // block
++    bq, grouped_heads = 8, 3
++    tg = grouped_heads * 32
++    common = [
++        ("T", q.dtype),
++        ("D", D),
++        ("HQ", Hq),
++        ("HKV", Hkv),
++        ("R", rel.shape[-1]),
++        ("WINDOW", 0),
++        ("BQ", bq),
++        ("BK", _BK),
++        ("PAD", _PAD),
++        ("GQ", grouped_heads),
++        ("FAST_MASK", _FAST_MASK),
++        ("TG", tg),
++        ("BS", block),
++        ("NB", nblocks),
++    ]
++    part_shape = (B, nblocks, L, Hq)
++    part_max, part_sum, part_acc = _verify_attention_partials(
++        inputs=[
++            q,
++            k,
++            v,
++            mx.contiguous(rel),
++            mx.broadcast_to(length.astype(mx.int32), (B,)),
++            mx.array([L, S], dtype=mx.int32),
++            mx.array(scale, dtype=mx.float32),
++        ],
++        template=common,
++        grid=(nblocks * tg, Hkv, B),
++        threadgroup=(tg, 1, 1),
++        output_shapes=[part_shape, part_shape, (*part_shape, D)],
++        output_dtypes=[mx.float32, mx.float32, mx.float32],
++    )
++    return _verify_attention_combine(
++        inputs=[
++            part_max,
++            part_sum,
++            part_acc,
++            mx.contiguous(sinks.astype(mx.float32)),
++        ],
++        template=[("T", q.dtype), ("D", D), ("HQ", Hq), ("L", L), ("NB", nblocks)],
++        grid=(L * Hq * D, 1, B),
++        threadgroup=(D, 1, 1),
++        output_shapes=[(B, L, Hq, D)],
++        output_dtypes=[q.dtype],
++    )[0]
++
+ _relative_attention_kernel = mx.fast.metal_kernel(
+     name="inkling2_relative_attention_gqa",
+-    input_names=["q", "k", "v", "rel", "sinks", "key_start", "sizes", "scale"],
++    input_names=[
++        "q",
++        "k",
++        "v",
++        "rel",
++        "sinks",
++        "key_start",
++        "key_end",
++        "sizes",
++        "scale",
++    ],
+     output_names=["out"],
+     source=_RELATIVE_ATTENTION_SOURCE,
+     ensure_row_contiguous=False,
+@@ -1690,6 +1879,7 @@
+     scale: float,
+     window: int,
+     key_start: mx.array,
++    length: mx.array | None = None,
+ ) -> mx.array:
+     """q: (B, Hq, L, D), k and v: (B, Hkv, S, D), all bfloat16, with the queries
+     at the last L keys. rel: (B, L, Hq, R), the bias at distances below R.
+@@ -1697,6 +1887,10 @@
+     (B, L, Hq, D)."""
+     B, Hq, L, D = q.shape
+     Hkv, S = k.shape[1], k.shape[2]
++    if length is None:
++        length = mx.full((B,), S, dtype=mx.int32)
++    else:
++        length = mx.broadcast_to(length.astype(mx.int32), (B,))
+     bq = _BQ_SWA if window else _BQ
+     grouped_heads = Hq // Hkv if _GQ > 1 else 1
+     tg = grouped_heads * (bq // 8) * 32
+@@ -1708,6 +1902,7 @@
+             mx.contiguous(rel),
+             mx.contiguous(sinks.astype(mx.float32)),
+             mx.contiguous(key_start.astype(mx.int32)),
++            mx.contiguous(length),
+             mx.array([L, S], dtype=mx.int32),
+             mx.array(scale, dtype=mx.float32),
+         ],
+diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/language.py
+--- a/mlx_vlm/models/inkling2/language.py
++++ b/mlx_vlm/models/inkling2/language.py
+@@ -65,6 +65,7 @@
+ _FUSED_NORM_CAST = _os.environ.get("MLX_VLM_INKLING2_FUSED_NORM_CAST", "1") == "1"
+ _FUSED_ROUTER = _os.environ.get("MLX_VLM_INKLING2_FUSED_ROUTER", "1") == "1"
+ _FUSED_L2_CLIP = _os.environ.get("MLX_VLM_INKLING2_FUSED_L2_CLIP", "1") == "1"
++_SPLITK_VERIFY = _os.environ.get("MLX_VLM_INKLING2_SPLITK_VERIFY", "0")
+ _FUSED_MOE = _os.environ.get("MLX_VLM_INKLING2_FUSED_MOE", "1") == "1"
+ _FUSED_O_TAIL = _os.environ.get("MLX_VLM_INKLING2_FUSED_O_TAIL", "1") == "1"
+ # Sliding-ring decode attention as MLX's two-pass SDPA replica with the bias
+@@ -903,6 +904,34 @@
+                 k, v = mx.roll(k, -kv._idx, axis=2), mx.roll(v, -kv._idx, axis=2)
+         size = k.shape[2]
+         padding = getattr(kv, "left_padding", None)
++        valid_length = getattr(kv, "length", None)
++        if (
++            _SPLITK_VERIFY == "shared"
++            and b == 1
++            and 1 < length <= 8
++            and valid_length is not None
++            and size >= 16384
++            and not isinstance(kv, (RotatingKVCache, BatchRotatingKVCache))
++            and q.dtype == k.dtype == v.dtype == mx.bfloat16
++            and self.head_dim % 32 == 0
++            and mx.metal.is_available()
++            and mx.default_device() == mx.gpu
++        ):
++            rel = r @ self.rel_proj.astype(x.dtype)
++            sinks = self.sink_proj(x)
++            if self.sharding_group is not None:
++                sinks = sinks[..., self.head_start : self.head_start + self.n_heads]
++            from .kernels import verify_attention_split
++
++            return verify_attention_split(
++                q,
++                k,
++                v,
++                rel,
++                sinks,
++                scale=self.head_dim**-0.5,
++                length=valid_length,
++            ).transpose(0, 2, 1, 3)
+         if (
+             padding is None
+             and q.dtype == k.dtype == v.dtype == mx.bfloat16
+@@ -926,6 +955,7 @@
+                 scale=self.head_dim**-0.5,
+                 window=self.sliding,
+                 key_start=mx.zeros((b,), mx.int32),
++                length=valid_length,
+             )
+             return out.transpose(0, 2, 1, 3)
+         mask = banded_additive_mask(
+@@ -1642,3 +1672,23 @@
+         from ...speculative.cache_state import rollback_speculative_cache
+ 
+         return rollback_speculative_cache(caches, gdn_states, accepted, block_size)
++
++    def speculative_verify_dflash_greedy(
++        self, inputs, cache, capture_layer_ids
++    ):
++        from .exact_verify import exact_verify
++
++        # Rows bitwise equal to the compiled decode step (MLX_VLM_INKLING2_EXACT_VERIFY).
++        result = exact_verify(self, inputs, cache, capture_layer_ids)
++        if result is not None:
++            return result
++        # Counted: a block the k-row exact verifier could not serve; in exact
++        # mode it is decoded token by token instead (still exact).
++        self.__dict__["_exact_verify_misses"] = self.__dict__.get("_exact_verify_misses", 0) + 1
++        from .exact_verify import _ENABLED as _EXACT, sequential_verify
++
++        if _EXACT and inputs.shape[0] == 1:
++            return sequential_verify(self, inputs, cache, capture_layer_ids)
++        from .fast_verify import compiled_verify
++
++        return compiled_verify(self, inputs, cache, capture_layer_ids)
+diff -ruN a/mlx_vlm/models/inkling2/step_cache.py b/mlx_vlm/models/inkling2/step_cache.py
+--- a/mlx_vlm/models/inkling2/step_cache.py
++++ b/mlx_vlm/models/inkling2/step_cache.py
+@@ -67,3 +67,71 @@
+ 
+     def advance(self, n):
+         pass
++
++
++class VerifyKVCache(KVCache):
++    """A fixed-capacity global cache updated by a k-token verifier graph."""
++
++    def __init__(self, keys, values, offset):
++        self.keys, self.values = keys, values
++        self.offset = offset
++        self.length = None
++        self.new_keys = self.new_values = None
++
++    def update_and_fetch(self, keys, values):
++        self.new_keys, self.new_values = keys, values
++        start = self.offset.reshape(1)
++        self.keys = mx.slice_update(self.keys, keys, start, axes=(2,))
++        self.values = mx.slice_update(self.values, values, start, axes=(2,))
++        self.length = self.offset + keys.shape[2]
++        return self.keys, self.values
++
++
++class VerifyRotatingKVCache(RotatingKVCache):
++    """Read a serving ring without mutating it and append verifier rows aside.
++
++    Attention consumes the chronological ``window-1+k`` view used by the native
++    RotatingKVCache block path. Only ``new_keys/new_values`` leave the compiled
++    graph; the transaction commits their accepted prefix to the serving ring.
++    """
++
++    def __init__(self, keys, values, idx, max_size):
++        self.keys, self.values = keys, values
++        self._idx = idx
++        self.max_size = max_size
++        self.keep = 0
++        self.offset = max_size
++        self.new_keys = self.new_values = None
++
++    def update_and_fetch(self, keys, values):
++        self.new_keys, self.new_values = keys, values
++        idx = mx.where(self._idx == self.max_size, 0, self._idx)
++        order = (mx.arange(self.max_size, dtype=mx.int32) + idx) % self.max_size
++        old_keys = mx.take(self.keys, order, axis=2)
++        old_values = mx.take(self.values, order, axis=2)
++        self.keys = mx.concatenate([old_keys[..., 1:, :], keys], axis=2)
++        self.values = mx.concatenate([old_values[..., 1:, :], values], axis=2)
++        return self.keys, self.values
++
++    def _temporal_order(self, value):
++        return value
++
++
++class VerifyConvCache(StepConvCache):
++    """Record every k-token short-convolution window for prefix commit."""
++
++    left_padding = None
++    lengths = None
++    is_speculating = True
++
++    def __init__(self, states):
++        super().__init__(states)
++        self.records = {}
++
++    def record_speculative_window(self, index, source, width):
++        self.records[int(index)] = (source, int(width))
++
++    def record_speculative_states(self, index, intermediate, final):
++        # Unpadded Inkling2 verification uses window records. Retain this path
++        # for completeness if a future cache mask requests explicit states.
++        self.records[int(index)] = (intermediate, final)
+diff -ruN a/mlx_vlm/models/inkling2/verify_kernels.py b/mlx_vlm/models/inkling2/verify_kernels.py
+--- a/mlx_vlm/models/inkling2/verify_kernels.py
++++ b/mlx_vlm/models/inkling2/verify_kernels.py
+@@ -0,0 +1,1445 @@
++"""Multi-row attention kernels for the exact k-row verifier (track B3).
++
++Every row r of a verify block is computed as the compiled single-token decode
++step computes position offset + r: the kernels below are derived from the
++decode kernels by text substitution (asserted), so every arithmetic line is
++the decode kernel's own. Only the indexing changes:
++- a row index (grid z) selects the row's query, bias, sink, gate and output;
++- the block's new K/V rows come from a side buffer (R, HKV, D) instead of the
++  cache buffer: global keys at positions >= base, sliding keys at the ring
++  slots s0 .. s0 + r. They hold the same values the decode step would have
++  written into the cache before its attention, so each row reads exactly the
++  keys and values of its decode step.
++"""
++
++from functools import lru_cache
++
++import mlx.core as mx
++
++from . import attn_kernels as _ak
++from . import kernels as _k
++
++
++def _sub(src, old, new, count=1):
++    n = src.count(old)
++    if n != count:
++        raise RuntimeError(f"verify_kernels: expected {count} x {old!r}, found {n}")
++    return src.replace(old, new)
++
++
++# Block counts are run-time inputs and the combine's threadgroup arrays have a
++# fixed size, so the kernels do not depend on the cache capacity (one Metal
++# compile for every request length; arithmetic unchanged).
++_NBMAX = 3072
++
++# --------------------------------------------------------------------------
++# Global layers: kernels._DECODE_PARTIALS_SRC / _DECODE_COMBINE2_SRC per row.
++
++_GP = _k._DECODE_PARTIALS_SRC
++_GP = _sub(_GP, "const int S = sizes[0];",
++           "const int vrow = threadgroup_position_in_grid.z;\n"
++           "        const int S = sizes[vrow];\n"
++           "        const int base = new_base[0];")
++_GP = _sub(_GP, "qv[h][e] = float(q[(g * G + h) * D + lane * E + e]) * sc;",
++           "qv[h][e] = float(q[(vrow * HQ + g * G + h) * D + lane * E + e]) * sc;")
++_GP = _sub(_GP, "if (NEWROW && j == S - 1) {", "if (NEWROW && j >= base) {")
++_GP = _sub(_GP, "kv[e] = float(k_new[g * D + lane * E + e]);",
++           "kv[e] = float(k_new[((j - base) * HKV + g) * D + lane * E + e]);")
++_GP = _sub(_GP, "vv[e] = float(v_new[g * D + lane * E + e]);",
++           "vv[e] = float(v_new[((j - base) * HKV + g) * D + lane * E + e]);")
++_GP = _sub(_GP, "if (dist < REL) s += float(rel[(g * G + h) * REL + dist]);",
++           "if (dist < REL) s += float(rel[(vrow * HQ + g * G + h) * REL + dist]);")
++_GP = _sub(_GP, "const int row = block * HQ + g * G + h;",
++           "const int row = (vrow * nbk[0] + block) * HQ + g * G + h;")
++
++_GC = _k._DECODE_COMBINE2_SRC
++_GC = _sub(_GC, "const int lid = thread_position_in_threadgroup.x;",
++           "const int lid = thread_position_in_threadgroup.x;\n"
++           "        const int vrow = threadgroup_position_in_grid.z;")
++_GC = _sub(_GC, "const int nblocks = sizes[1];", "const int nblocks = sizes[vrow * 2 + 1];")
++_GC = _sub(_GC, "part_max[b * HQ + h]", "part_max[(vrow * nbk[0] + b) * HQ + h]", count=2)
++_GC = _sub(_GC, "tsum[b] = part_sum[b * HQ + h];", "tsum[b] = part_sum[(vrow * nbk[0] + b) * HQ + h];")
++_GC = _sub(_GC, "part_acc[size_t((b0 + i) * HQ + h) * D + d]",
++           "part_acc[size_t((vrow * nbk[0] + b0 + i) * HQ + h) * D + d]")
++_GC = _sub(_GC, "float(sinks[h])", "float(sinks[vrow * HQ + h])", count=2)
++_GC = _sub(_GC, "const float g = float(gate[h * D + d]);",
++           "const float g = float(gate[(vrow * HQ + h) * D + d]);")
++_GC = _sub(_GC, "out[h * D + d] =", "out[(vrow * HQ + h) * D + d] =", count=2)
++
++
++@lru_cache(maxsize=None)
++def _global_partials():
++    # Same (default) compile options as kernels._decode_partials.
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_global_partials",
++        input_names=["q", "k", "v", "rel", "key_start", "sizes", "scale", "k_new", "v_new",
++                     "new_base", "nbk"],
++        output_names=["part_max", "part_sum", "part_acc"],
++        ensure_row_contiguous=False,
++        source=_GP,
++    )
++
++
++@lru_cache(maxsize=None)
++def _global_combine():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_global_combine2",
++        input_names=["part_max", "part_sum", "part_acc", "sinks", "sizes", "gate", "nbk"],
++        output_names=["out"],
++        source=_GC,
++    )
++
++
++def global_rows(q, k, v, k_new, v_new, base, rel, sinks, gate, *, scale):
++    """R decode rows of a global layer at positions base .. base + R - 1.
++
++    q (R, HQ, D); k, v (1, HKV, cap, D) the cache buffers (rows >= base not
++    read); k_new, v_new (R, HKV, D) the block's rows; base () int32; rel
++    (R, HQ, REL); sinks (R, HQ); gate (R, HQ * D). Returns (R, HQ, D): row r
++    is kernels.decode_attention(q[r], ..., length=base + r + 1, gate=gate[r])
++    on the cache with rows 0..r written."""
++    R, hq, d = q.shape
++    hkv, cap = k.shape[1], k.shape[2]
++    nb = (cap + _k._DECODE_BLOCK - 1) // _k._DECODE_BLOCK
++    assert d % 32 == 0 and nb <= 3072 and _k._COMBINE2
++    base = base.reshape(1).astype(mx.int32)
++    lengths = base + 1 + mx.arange(R, dtype=mx.int32)
++    zero = mx.zeros((1,), mx.int32)
++    part_max, part_sum, part_acc = _global_partials()(
++        inputs=[mx.contiguous(q), k, v, mx.contiguous(rel), zero, lengths,
++                mx.array(scale, dtype=mx.float32), mx.contiguous(k_new), mx.contiguous(v_new),
++                base, mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("REL", rel.shape[-1]),
++                  ("BS", _k._DECODE_BLOCK), ("SG", _k._DECODE_SIMDGROUPS), ("NEWROW", True)],
++        grid=(nb * 32 * _k._DECODE_SIMDGROUPS, hkv, R),
++        threadgroup=(32 * _k._DECODE_SIMDGROUPS, 1, 1),
++        output_shapes=[(R * nb * hq,), (R * nb * hq,), (R * nb * hq, d)],
++        output_dtypes=[mx.float32, mx.float32, mx.float32],
++    )
++    csizes = mx.stack([lengths, (lengths + (_k._DECODE_BLOCK - 1)) // _k._DECODE_BLOCK], axis=1)
++    return _global_combine()(
++        inputs=[part_max, part_sum, part_acc, sinks.astype(mx.float32), csizes,
++                mx.contiguous(gate), mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("DT", 32),
++                  ("NBMAX", _NBMAX), ("HAS_GATE", True)],
++        grid=(hq * d, 1, R),
++        threadgroup=(32, 1, 1),
++        output_shapes=[(R, hq, d)],
++        output_dtypes=[q.dtype],
++    )[0]
++
++
++# --------------------------------------------------------------------------
++# Sliding layers: attn_kernels' MLX-layout two-pass SDPA (_P1M_SRC, _P2G_SRC).
++# Row r: ring slots s0 .. s0 + r (mod N) hold the block's rows 0..r, every
++# other slot the ring as it was before the block; ring_idx[r] = next write
++# slot after row r (StepRotatingKVCache._idx).
++
++_SP = _ak._P1M_SRC
++_SP = _sub(_SP, "const int h = kvh * G + g;",
++           "const int h = kvh * G + g;\n    const int vrow = int(threadgroup_position_in_grid.z);")
++_SP = _sub(_SP, "const int widx = BIAS == 1 ? ring_idx[0] : 0;",
++           "const int widx = BIAS == 1 ? ring_idx[vrow] : 0;")
++_SP = _sub(_SP, "q[i] = static_cast<float>(scale) * queries[h * D + simd_lid * QK + i];",
++           "q[i] = static_cast<float>(scale) * queries[(vrow * HQ + h) * D + simd_lid * QK + i];")
++_SP = _sub(_SP, "max_score = static_cast<float>(sinks[h]);",
++           "max_score = static_cast<float>(sinks[vrow * HQ + h]);")
++_SP = _sub(_SP, "if (NEWROW && ii == nslot) {",
++           "int dp = (ii - nslot) % N;\n"
++           "            if (dp < 0) dp += N;\n"
++           "            if (NEWROW && dp <= vrow) {")
++_SP = _sub(_SP, "k_reg[t][j] = k_new[kvh * D + simd_lid * QK + j];",
++           "k_reg[t][j] = k_new[(dp * HKV + kvh) * D + simd_lid * QK + j];")
++_SP = _sub(_SP, "v_reg[t][j] = v_new[kvh * D + simd_lid * QK + j];",
++           "v_reg[t][j] = v_new[(dp * HKV + kvh) * D + simd_lid * QK + j];")
++_SP = _sub(_SP, "if (NEWROW && i == nslot) {",
++           "int dp = (i - nslot) % N;\n"
++           "        if (dp < 0) dp += N;\n"
++           "        if (NEWROW && dp <= vrow) {")
++_SP = _sub(_SP, "kr[j] = static_cast<float>(k_new[kvh * D + simd_lid * QK + j]);",
++           "kr[j] = static_cast<float>(k_new[(dp * HKV + kvh) * D + simd_lid * QK + j]);")
++_SP = _sub(_SP, "vr[j] = static_cast<float>(v_new[kvh * D + simd_lid * QK + j]);",
++           "vr[j] = static_cast<float>(v_new[(dp * HKV + kvh) * D + simd_lid * QK + j]);")
++_SP = _sub(_SP, "mv = dist < REL ? rel[h * REL + dist] : T(0);",
++           "mv = dist < REL ? rel[(vrow * HQ + h) * REL + dist] : T(0);", count=2)
++_SP = _sub(_SP, "const int row = h * BLOCKS + block_idx;",
++           "const int row = (vrow * HQ + h) * BLOCKS + block_idx;")
++
++_SC = _ak._P2G_SRC
++_SC = _sub(_SC, "const int q_offset = threadgroup_position_in_grid.x;",
++           "const int q_offset = int(threadgroup_position_in_grid.z) * HQ"
++           " + int(threadgroup_position_in_grid.x);")
++
++
++@lru_cache(maxsize=None)
++def _sliding_p1():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_sliding_p1",
++        input_names=["queries", "keys", "values", "mask", "rel", "ring_idx", "sinks", "scale",
++                     "k_new", "v_new", "new_slot"],
++        output_names=["partials", "sums", "maxs"],
++        ensure_row_contiguous=False,
++        compile_options={"math_mode": "safe"},
++        source=_SP,
++    )
++
++
++@lru_cache(maxsize=None)
++def _sliding_p2():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_sliding_p2",
++        input_names=["partials", "sums", "maxs", "gate"],
++        output_names=["out"],
++        compile_options={"math_mode": "safe"},
++        source=_SC,
++    )
++
++
++def sliding_rows(q, k, v, k_new, v_new, s0, rel, sinks, gate, *, scale, blocks=64, tk=None):
++    """R decode rows of a sliding layer. q (R, HQ, D); k, v (1, HKV, N, D) the
++    full ring before the block; k_new, v_new (R, HKV, D); s0 () int32 the
++    slot of row 0; rel (R, HQ, REL); sinks (R, HQ) in q's dtype; gate
++    (R, HQ * D). Row r is attn_kernels.sliding_attention on the ring with
++    rows 0..r written (ring_idx = slot of row r + 1), gated."""
++    R, hq, d = q.shape
++    hkv, n = k.shape[1], k.shape[2]
++    assert d % 32 == 0 and hq % hkv == 0 and blocks % 32 == 0
++    s0 = s0.reshape(1).astype(mx.int32)
++    ring_idx = (s0 + mx.arange(R, dtype=mx.int32)) % n + 1
++    part, sums, maxs = _sliding_p1()(
++        inputs=[mx.contiguous(q), k, v, q, mx.contiguous(rel), ring_idx, mx.contiguous(sinks),
++                mx.array(scale, mx.float32), mx.contiguous(k_new), mx.contiguous(v_new), s0],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("N", n),
++                  ("BLOCKS", blocks), ("BIAS", 1), ("NEWROW", True),
++                  ("REL", rel.shape[-1]), ("TKP", tk or _ak._SDPA_TK)],
++        grid=(hkv * blocks * 32, hq // hkv, R),
++        threadgroup=(32, hq // hkv, 1),
++        output_shapes=[(R * hq * blocks, d), (R * hq * blocks,), (R * hq * blocks,)],
++        output_dtypes=[q.dtype, mx.float32, mx.float32],
++    )
++    return _sliding_p2()(
++        inputs=[part, sums, maxs, mx.contiguous(gate)],
++        template=[("T", q.dtype), ("D", d), ("BLOCKS", blocks), ("HAS_GATE", True), ("HQ", hq)],
++        grid=(hq * 1024, 1, R),
++        threadgroup=(1024, 1, 1),
++        output_shapes=[(R, hq, d)],
++        output_dtypes=[q.dtype],
++    )[0]
++
++
++# --------------------------------------------------------------------------
++# Global layers, shared reads: one threadgroup per (key block, KV head) for
++# ALL rows. Simdgroup (sg, rg) walks the keys of decode simdgroup sg
++# (start + sg, + SG, ...) for the RPS rows of row group rg, so the RG
++# simdgroups of one sg read the same K/V rows (L1) and the block is read from
++# DRAM once. Per row the arithmetic is the decode kernel's line for line
++# (kernels._DECODE_PARTIALS_SRC): the same keys per simdgroup in the same
++# order, the same per-key update, the same cross-simdgroup combine (one row
++# per round through threadgroup memory).
++
++_GPS = r"""
++        constexpr int G = HQ / HKV;
++        constexpr int E = D / 32;
++        const uint lane = thread_index_in_simdgroup;
++        const int sidx = int(simdgroup_index_in_threadgroup);
++        const int sg = sidx % SG;
++        const int rg = sidx / SG;
++        const int block = threadgroup_position_in_grid.x;
++        const int g = threadgroup_position_in_grid.y;
++        const int base = new_base[0];
++        const int start = block * BS;
++        const int Smax = base + R;
++        if (start >= Smax) return;
++        const int end_max = min(start + BS, Smax);
++        const float sc = scale;
++
++        float qv[RPS][G][E];
++        float m[RPS][G], l[RPS][G], acc[RPS][G][E];
++        for (int i = 0; i < RPS; ++i) {
++            const int r = min(rg * RPS + i, R - 1);
++            for (int h = 0; h < G; ++h) {
++                for (int e = 0; e < E; ++e)
++                    qv[i][h][e] = float(q[(r * HQ + g * G + h) * D + lane * E + e]) * sc;
++                m[i][h] = -INFINITY;
++                l[i][h] = 0.0f;
++                for (int e = 0; e < E; ++e) acc[i][h][e] = 0.0f;
++            }
++        }
++        const device T* k_head = k + g * k_strides[1];
++        const device T* v_head = v + g * v_strides[1];
++        int j = start + sg;
++        vec<T, E> k_next = vec<T, E>(0), v_next = vec<T, E>(0);
++        if (j < end_max) {
++            k_next = *(const device vec<T, E>*)(k_head + size_t(j) * k_strides[2] + lane * E);
++            v_next = *(const device vec<T, E>*)(v_head + size_t(j) * v_strides[2] + lane * E);
++        }
++        for (; j < end_max; j += SG) {
++            float kv[E], vv[E];
++            for (int e = 0; e < E; ++e) {
++                kv[e] = float(k_next[e]);
++                vv[e] = float(v_next[e]);
++            }
++            if (j >= base) {
++                // A block row: the value its decode step wrote at position j.
++                for (int e = 0; e < E; ++e) {
++                    kv[e] = float(k_new[((j - base) * HKV + g) * D + lane * E + e]);
++                    vv[e] = float(v_new[((j - base) * HKV + g) * D + lane * E + e]);
++                }
++            }
++            if (j + SG < end_max) {
++                const size_t jn = size_t(j + SG);
++                k_next = *(const device vec<T, E>*)(k_head + jn * k_strides[2] + lane * E);
++                v_next = *(const device vec<T, E>*)(v_head + jn * v_strides[2] + lane * E);
++            }
++            for (int i = 0; i < RPS; ++i) {
++                const int r = rg * RPS + i;
++                const int S = base + r + 1;
++                if (r >= R || j >= S) continue;
++                const int dist = S - 1 - j;
++                for (int h = 0; h < G; ++h) {
++                    float s = 0.0f;
++                    for (int e = 0; e < E; ++e) s += qv[i][h][e] * kv[e];
++                    s = simd_sum(s);
++                    if (dist < REL) s += float(rel[(r * HQ + g * G + h) * REL + dist]);
++                    const float mn = max(m[i][h], s);
++                    const float f = metal::exp(m[i][h] - mn);
++                    const float p = metal::exp(s - mn);
++                    l[i][h] = l[i][h] * f + p;
++                    for (int e = 0; e < E; ++e) acc[i][h][e] = acc[i][h][e] * f + p * vv[e];
++                    m[i][h] = mn;
++                }
++            }
++        }
++
++        threadgroup float tm[SG][G];
++        threadgroup float tl[SG][G];
++        threadgroup float ta[SG][G][D];
++        for (int rr = 0; rr < R; ++rr) {
++            const int owner = rr / RPS;
++            const int i = rr % RPS;
++            const bool live = start < base + rr + 1;  // the decode step writes this block
++            if (rg == owner) {
++                for (int h = 0; h < G; ++h) {
++                    if (lane == 0) {
++                        tm[sg][h] = m[i][h];
++                        tl[sg][h] = l[i][h];
++                    }
++                    for (int e = 0; e < E; ++e) ta[sg][h][lane * E + e] = acc[i][h][e];
++                }
++            }
++            threadgroup_barrier(mem_flags::mem_threadgroup);
++            if (live) {
++                for (uint t = thread_position_in_threadgroup.x; t < uint(G * D); t += SG * RG * 32) {
++                    const int h = t / D, d = t % D;
++                    float M = -INFINITY;
++                    for (int s = 0; s < SG; ++s) M = max(M, tm[s][h]);
++                    float L = 0.0f, A = 0.0f;
++                    if (M > -INFINITY) {
++                        for (int s = 0; s < SG; ++s) {
++                            const float w = metal::exp(tm[s][h] - M);
++                            L += tl[s][h] * w;
++                            A += ta[s][h][d] * w;
++                        }
++                    }
++                    const int row = (rr * nbk[0] + block) * HQ + g * G + h;
++                    part_acc[size_t(row) * D + d] = A;
++                    if (d == 0) {
++                        part_max[row] = M;
++                        part_sum[row] = L;
++                    }
++                }
++            }
++            threadgroup_barrier(mem_flags::mem_threadgroup);
++        }
++"""
++
++
++@lru_cache(maxsize=None)
++def _global_partials_shared():
++    # Same (default) compile options as kernels._decode_partials.
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_global_partials_shared",
++        input_names=["q", "k", "v", "rel", "scale", "k_new", "v_new", "new_base", "nbk"],
++        output_names=["part_max", "part_sum", "part_acc"],
++        ensure_row_contiguous=False,
++        source=_GPS,
++    )
++
++
++def global_rows_shared(q, k, v, k_new, v_new, base, rel, sinks, gate, *, scale, rps=1):
++    """global_rows with each K/V block read once for all rows."""
++    R, hq, d = q.shape
++    hkv, cap = k.shape[1], k.shape[2]
++    nb = (cap + _k._DECODE_BLOCK - 1) // _k._DECODE_BLOCK
++    assert d % 32 == 0 and nb <= 3072 and _k._COMBINE2 and hq // hkv == 3
++    rps = max(1, min(int(rps), R))
++    rg = (R + rps - 1) // rps
++    sg = _k._DECODE_SIMDGROUPS
++    assert sg * rg * 32 <= 1024
++    base = base.reshape(1).astype(mx.int32)
++    lengths = base + 1 + mx.arange(R, dtype=mx.int32)
++    part_max, part_sum, part_acc = _global_partials_shared()(
++        inputs=[mx.contiguous(q), k, v, mx.contiguous(rel), mx.array(scale, dtype=mx.float32),
++                mx.contiguous(k_new), mx.contiguous(v_new), base, mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("REL", rel.shape[-1]),
++                  ("BS", _k._DECODE_BLOCK), ("SG", sg), ("R", R), ("RPS", rps), ("RG", rg)],
++        grid=(nb * 32 * sg * rg, hkv, 1),
++        threadgroup=(32 * sg * rg, 1, 1),
++        output_shapes=[(R * nb * hq,), (R * nb * hq,), (R * nb * hq, d)],
++        output_dtypes=[mx.float32, mx.float32, mx.float32],
++    )
++    csizes = mx.stack([lengths, (lengths + (_k._DECODE_BLOCK - 1)) // _k._DECODE_BLOCK], axis=1)
++    return _global_combine()(
++        inputs=[part_max, part_sum, part_acc, sinks.astype(mx.float32), csizes,
++                mx.contiguous(gate), mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("DT", 32),
++                  ("NBMAX", _NBMAX), ("HAS_GATE", True)],
++        grid=(hq * d, 1, R),
++        threadgroup=(32, 1, 1),
++        output_shapes=[(R, hq, d)],
++        output_dtypes=[q.dtype],
++    )[0]
++
++
++# --------------------------------------------------------------------------
++# bf16 GEMV for M rows with gemv_kernels' per-row arithmetic (the decode
++# step's projections: rs, sgs, hb = 1, 8, 18): each weight block is loaded
++# once and accumulated into every row's result in the decode order.
++
++_GEMV_M_HEADER = r"""
++template <typename T, int K, int RS, int HB, int M>
++inline void ink_gemv_rows_hoist_m(const device T* w, const device T* x, uint lane,
++                                  thread float (*result)[M]) {
++  constexpr int NI = K / 128;
++  const device T* xp = x + lane * 4;
++  const device T* wp = w + lane * 4;
++  for (int i0 = 0; i0 < NI; i0 += HB) {
++    vec<T, 4> wv[HB][RS];
++#pragma unroll
++    for (int h = 0; h < HB; ++h)
++#pragma unroll
++      for (int tm = 0; tm < RS; ++tm)
++        wv[h][tm] = (i0 + h < NI) ? *(const device vec<T, 4>*)(wp + tm * K + (i0 + h) * 128) : vec<T, 4>(0);
++#pragma unroll
++    for (int h = 0; h < HB; ++h) {
++      if (i0 + h >= NI) break;
++      for (int mm = 0; mm < M; ++mm) {
++        float v_coeff[4];
++        for (int tn = 0; tn < 4; tn++) v_coeff[tn] = static_cast<float>(xp[mm * K + (i0 + h) * 128 + tn]);
++        for (int tm = 0; tm < RS; tm++) {
++          T inter[4];
++          for (int tn = 0; tn < 4; tn++) inter[tn] = wv[h][tm][tn];
++          for (int tn = 0; tn < 4; tn++) result[tm][mm] += inter[tn] * v_coeff[tn];
++        }
++      }
++    }
++  }
++}
++"""
++
++_GEMV_M_SRC = r"""
++    const uint lane = thread_index_in_simdgroup;
++    const uint sg = simdgroup_index_in_threadgroup;
++    const int row0 = (int(threadgroup_position_in_grid.x) * SGS + int(sg)) * RS;
++    if (row0 >= N) return;
++    float result[RS][M];
++    for (int r = 0; r < RS; ++r)
++        for (int mm = 0; mm < M; ++mm) result[r][mm] = 0.0f;
++    ink_gemv_rows_hoist_m<T, K, RS, HB, M>(w + size_t(row0) * K, x, lane, result);
++    for (int r = 0; r < RS; ++r)
++        for (int mm = 0; mm < M; ++mm)
++            for (ushort sn = 16; sn >= 1; sn >>= 1) result[r][mm] += simd_shuffle_down(result[r][mm], sn);
++    if (lane == 0)
++        for (int r = 0; r < RS; ++r)
++            if (row0 + r < N)
++                for (int mm = 0; mm < M; ++mm) y[mm * N + row0 + r] = static_cast<T>(result[r][mm]);
++"""
++
++
++@lru_cache(maxsize=None)
++def _gemv_m_kernel():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_gemv_m",
++        input_names=["w", "x"],
++        output_names=["y"],
++        header=_GEMV_M_HEADER,
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=_GEMV_M_SRC,
++    )
++
++
++def gemv_m(x, w, *, rs=1, sgs=8, hb=18):
++    """x (M, K) bf16 rows, w (N, K) -> (M, N): row m is gemv_kernels.gemv(x[m], w,
++    rs=rs, sgs=sgs, hb=hb) (hb > 0 path), the weights read once."""
++    m, k = x.shape
++    n = w.shape[0]
++    assert k % 128 == 0 and n % rs == 0 and hb > 0
++    tgs = (n // rs + sgs - 1) // sgs
++    return _gemv_m_kernel()(
++        inputs=[w, x],
++        template=[("T", w.dtype), ("K", k), ("N", n), ("RS", rs), ("SGS", sgs), ("HB", hb),
++                  ("M", m)],
++        grid=(tgs * sgs * 32, 1, 1),
++        threadgroup=(sgs * 32, 1, 1),
++        output_shapes=[(m, n)],
++        output_dtypes=[w.dtype],
++    )[0]
++
++
++# --------------------------------------------------------------------------
++# gemv_kernels.o_proj_tail for M rows (the attention output already gated;
++# the decode configuration rs, sgs, hb = 1, 8, 0): o_proj per row with the
++# decode GEMV's arithmetic (weights loaded once), then per channel the
++# attention short convolution row after row (row m starts from the state
++# after row m - 1) with the residual add. Returns the FP32 residuals (M, N)
++# and the state after every row (M, W - 1, N).
++
++_O_TAIL_M_SRC = r"""
++    const uint lane = thread_index_in_simdgroup;
++    const uint sg = simdgroup_index_in_threadgroup;
++    const int row0 = (int(threadgroup_position_in_grid.x) * SGS + int(sg)) * RS;
++    if (row0 >= N) return;
++    float result[RS][M];
++    for (int r = 0; r < RS; ++r)
++        for (int mm = 0; mm < M; ++mm) result[r][mm] = 0.0f;
++    {
++        constexpr int NI = K / 128;
++        const device T* xa = attn + lane * 4;
++        const device T* wp = w + size_t(row0) * K + lane * 4;
++        for (int i = 0; i < NI; ++i) {
++            T inter[RS][4];
++            for (int tm = 0; tm < RS; tm++)
++                for (int tn = 0; tn < 4; tn++) inter[tm][tn] = wp[tm * K + i * 128 + tn];
++            for (int mm = 0; mm < M; ++mm) {
++                float v_coeff[4];
++                for (int tn = 0; tn < 4; tn++)
++                    v_coeff[tn] = static_cast<float>(xa[mm * K + i * 128 + tn]);
++                for (int tm = 0; tm < RS; tm++)
++                    for (int tn = 0; tn < 4; tn++) result[tm][mm] += inter[tm][tn] * v_coeff[tn];
++            }
++        }
++    }
++    for (int r = 0; r < RS; ++r)
++        for (int mm = 0; mm < M; ++mm)
++            for (ushort sn = 16; sn >= 1; sn >>= 1) result[r][mm] += simd_shuffle_down(result[r][mm], sn);
++    if (lane != 0) return;
++    for (int r = 0; r < RS; ++r) {
++        const int c = row0 + r;
++        float win[W - 1];
++        for (int j = 0; j < W - 1; ++j) win[j] = state[j * N + c];
++        for (int mm = 0; mm < M; ++mm) {
++            const T xo = static_cast<T>(result[r][mm]);
++            // short_convolution_residual_step for channel c
++            float value = 0;
++            for (int j = 0; j < W; ++j) {
++                int p = j - W + 1;
++                float xv = p < 0 ? float(win[p + W - 1]) : float(xo);
++                float wj = conv_w[c * W + j];
++                value = value + xv * wj;
++            }
++            const float xt = float(xo);
++            const T conv = T((value + xt) / divisor);
++            for (int j = 0; j < W - 2; ++j) win[j] = win[j + 1];
++            win[W - 2] = xt;
++            for (int j = 0; j < W - 1; ++j) states[(mm * (W - 1) + j) * N + c] = win[j];
++            residual[mm * N + c] = HAS_SKIP ? float(conv) + float(skip[mm * N + c]) : float(conv);
++        }
++    }
++"""
++
++
++@lru_cache(maxsize=None)
++def _o_tail_m_kernel():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_o_proj_tail_m",
++        input_names=["attn", "w", "state", "conv_w", "skip", "divisor"],
++        output_names=["residual", "states"],
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=_O_TAIL_M_SRC,
++    )
++
++
++def o_proj_tail_m(attn, w, state, conv_weight, skip, width, *, rs=1, sgs=8):
++    """attn (M, K) gated attention rows; state (1, W - 1, N) FP32; skip (M, N)
++    or None. Returns (residual (M, N) FP32, states (M, W - 1, N) FP32)."""
++    import math
++
++    m, k = attn.shape
++    n = w.shape[0]
++    assert k % 128 == 0 and n % rs == 0
++    tgs = (n // rs + sgs - 1) // sgs
++    return tuple(_o_tail_m_kernel()(
++        inputs=[attn, w, state, conv_weight, attn if skip is None else skip,
++                mx.array(math.sqrt(width + 1), mx.float32)],
++        template=[("T", w.dtype), ("K", k), ("N", n), ("RS", rs), ("SGS", sgs), ("M", m),
++                  ("W", width), ("HAS_SKIP", skip is not None)],
++        grid=(tgs * sgs * 32, 1, 1),
++        threadgroup=(sgs * 32, 1, 1),
++        output_shapes=[(m, n), (m, width - 1, n)],
++        output_dtypes=[mx.float32, mx.float32],
++    ))
++
++
++# --------------------------------------------------------------------------
++# MoE for M rows with each routed expert read once (moe_kernels' decode
++# kernels per row: the same top-k, the same per-lane qmv accumulation (the
++# register-word qdot of moe_kernels, equal to MLX's qdot), the same SwiGLU,
++# route combine and MLP short convolution, chained row after row).
++
++_MOE_M_HEADER = r"""
++template <typename T, int K, int BITS, int GS, int FAST, int RPS, int MP, int DQ>
++inline void ink_qmv_rows_multi(const device uint8_t* ws, const device uint8_t* sc,
++    const device T* xbase, const thread int* xoff, int np, uint lane,
++    thread float (*result)[MP], threadgroup const float* lut) {
++  constexpr int PACKS = FAST ? 2 : 1;
++  constexpr int PF = 32 / BITS;
++  constexpr int VPT = PF * PACKS;
++  constexpr int BS = VPT * 32;
++  constexpr int SSTEP = GS / VPT;
++  constexpr int WROW = K * 4 / PF;
++  constexpr int GROW = K / GS;
++  constexpr int NB = FAST ? K / BS : (K - 1) / BS;
++  constexpr int BW = BS * 4 / PF;
++  constexpr int BG = BS / GS;
++  ws += lane * PACKS * 4;
++  sc += lane / SSTEP;
++  const int xl = int(lane) * VPT;
++  float x_thread[VPT];
++  for (int b = 0; b < NB; ++b) {
++    uint w0[RPS], w1[RPS];
++    float s[RPS];
++    for (int r = 0; r < RPS; ++r) {
++      const device uint* wp = (const device uint*)(ws + r * WROW + b * BW);
++      w0[r] = wp[0];
++      w1[r] = PACKS == 2 ? wp[1] : 0u;
++      s[r] = ink_dq_scale<GS, DQ>(sc[r * GROW + b * BG], lut);
++    }
++    for (int p = 0; p < MP; ++p) {
++      if (p >= np) break;
++      ink_load_vector<T, float, VPT>(xbase + xoff[p] + b * BS + xl, x_thread);
++      for (int r = 0; r < RPS; ++r)
++        result[r][p] += ink_qdot_reg<VPT, BITS, DQ>(w0[r], w1[r], x_thread, s[r], VPT, lut);
++    }
++  }
++  if (!FAST) {
++    const int remaining = clamp(int(K - NB * BS - int(lane) * VPT), 0, VPT);
++    if (remaining > 0) {
++      uint w0[RPS], w1[RPS];
++      float s[RPS];
++      for (int r = 0; r < RPS; ++r) {
++        const device uint* wp = (const device uint*)(ws + r * WROW + NB * BW);
++        w0[r] = wp[0];
++        w1[r] = 0u;
++        s[r] = ink_dq_scale<GS, DQ>(sc[r * GROW + NB * BG], lut);
++      }
++      for (int p = 0; p < MP; ++p) {
++        if (p >= np) break;
++        ink_load_vector_safe<T, float, VPT>(xbase + xoff[p] + NB * BS + xl, x_thread, remaining);
++        for (int r = 0; r < RPS; ++r)
++          result[r][p] += ink_qdot_reg<VPT, BITS, DQ>(w0[r], w1[r], x_thread, s[r], remaining, lut);
++      }
++    }
++  }
++}
++"""
++
++_MOE_ROUTE_SRC = r"""
++    const int m = threadgroup_position_in_grid.x;
++    const uint lid = thread_position_in_threadgroup.x;
++    threadgroup int sel[TOPK];
++    const device float* ng = neg + m * NE;
++    for (int t = int(lid); t < NE; t += TGS) {
++        const float a = ng[t];
++        int rank = 0;
++        for (int j = 0; j < NE; ++j) {
++            const float b = ng[j];
++            rank += (ink_less(b, a) || (j < t && !ink_less(a, b))) ? 1 : 0;
++        }
++        if (rank < TOPK) sel[rank] = t;
++    }
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    if (lid == 0) {
++        float w[TOPK];
++        for (int i = 0; i < TOPK; ++i) w[i] = scores[m * NE + sel[i]];
++        float total = 0.0f;
++        {
++            #pragma clang fp contract(off)
++            SUM_EXPR
++        }
++        const float denom = total + 1e-20f;
++        for (int i = 0; i < TOPK; ++i) {
++            idx[m * TOPK + i] = uint(sel[i]);
++            wts[m * TOPK + i] = (w[i] / denom) * ROUTE_SCALE;
++        }
++    }
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    // The rows using each expert (row-major (m, route) order), one thread per expert.
++    if (m == 0) {
++        // (computed by the union kernel)
++    }
++"""
++
++_MOE_UNION_SRC = r"""
++    const int e = int(thread_position_in_grid.x);
++    if (e >= NE) return;
++    int cnt = 0;
++    for (int m = 0; m < M; ++m)
++        for (int i = 0; i < TOPK; ++i)
++            if (int(idx[m * TOPK + i]) == e) {
++                ulist[e * M + cnt] = m * TOPK + i;
++                cnt++;
++            }
++    ucount[e] = cnt;
++"""
++
++_MOE_GU_M_SRC = r"""
++    const uint lane = thread_index_in_simdgroup;
++    const uint sgi = simdgroup_index_in_threadgroup;
++    const int tg = threadgroup_position_in_grid.x;
++    constexpr int ROWS_TG = SG * RPS;
++    constexpr int CHUNKS = N / ROWS_TG;
++    const int e = tg / CHUNKS;
++    const int cnt = ucount[e];
++    if (cnt == 0) return;
++    threadgroup float lut[16 + 256];
++    const int row0 = (tg % CHUNKS) * ROWS_TG + int(sgi) * RPS;
++    int xoff[M];
++    for (int p = 0; p < M; ++p) xoff[p] = p < cnt ? (ulist[e * M + p] / TOPK) * K : 0;
++    constexpr int WROW = K * 4 / (32 / BITS);
++    constexpr int GROW = K / GS;
++    float rg[RPS][M], ru[RPS][M];
++    for (int r = 0; r < RPS; ++r)
++        for (int p = 0; p < M; ++p) { rg[r][p] = 0.0f; ru[r][p] = 0.0f; }
++    const size_t wo = (size_t(e) * N + row0) * WROW;
++    const size_t so = (size_t(e) * N + row0) * GROW;
++    ink_qmv_rows_multi<T, K, BITS, GS, FAST, RPS, M, 0>(
++        (const device uint8_t*)wg + wo, sg + so, x, xoff, cnt, lane, rg, lut);
++    ink_qmv_rows_multi<T, K, BITS, GS, FAST, RPS, M, 0>(
++        (const device uint8_t*)wu + wo, su + so, x, xoff, cnt, lane, ru, lut);
++    float invg = 1.0f, invu = 1.0f;
++    if (HAS_GSCALE) {
++        invg = fg[e] / (448.0f * 6.0f);
++        invu = fu[e] / (448.0f * 6.0f);
++    }
++    for (int p = 0; p < M; ++p) {
++        if (p >= cnt) break;
++        for (int r = 0; r < RPS; ++r) {
++            rg[r][p] = simd_sum(rg[r][p]);
++            ru[r][p] = simd_sum(ru[r][p]);
++        }
++    }
++    if (lane == 0) {
++        for (int p = 0; p < M; ++p) {
++            if (p >= cnt) break;
++            const int slot = ulist[e * M + p];
++            for (int r = 0; r < RPS; ++r) {
++                const T gb = HAS_GSCALE ? static_cast<T>(rg[r][p] * invg) : static_cast<T>(rg[r][p]);
++                const T ub = HAS_GSCALE ? static_cast<T>(ru[r][p] * invu) : static_cast<T>(ru[r][p]);
++                // _softcapped_swiglu(up, gate, GCAP, UCAP)
++                const float g = float(gb), u = float(ub);
++                const float v = metal::precise::tanh(g / GCAP) * GCAP * ink_sigmoid(g)
++                    * metal::precise::tanh(u / UCAP) * UCAP;
++                act[slot * N + row0 + r] = static_cast<T>(v);
++            }
++        }
++    }
++"""
++
++_MOE_DT_M_SRC = r"""
++    const uint lane = thread_index_in_simdgroup;
++    const uint sgi = simdgroup_index_in_threadgroup;
++    const uint lid = thread_position_in_threadgroup.x;
++    const int tg = threadgroup_position_in_grid.x;
++    constexpr int CH = RPS;
++    threadgroup float eo[M * TOPK][CH];
++    threadgroup float lut[16 + 256];
++    const int c0 = tg * CH;
++    constexpr int WROW = K * 4 / (32 / BITS);
++    constexpr int GROW = K / GS;
++    int used = 0;
++    for (int e = 0; e < NE; ++e) {
++        const int cnt = ucount[e];
++        if (cnt == 0) continue;
++        if ((used++ % SG) != int(sgi)) continue;
++        int xoff[M];
++        for (int p = 0; p < M; ++p) xoff[p] = p < cnt ? ulist[e * M + p] * K : 0;
++        float res[RPS][M];
++        for (int r = 0; r < RPS; ++r)
++            for (int p = 0; p < M; ++p) res[r][p] = 0.0f;
++        ink_qmv_rows_multi<T, K, BITS, GS, FAST, RPS, M, 0>(
++            (const device uint8_t*)wd + (size_t(e) * N + c0) * WROW,
++            sd + (size_t(e) * N + c0) * GROW, act, xoff, cnt, lane, res, lut);
++        float inv = 1.0f;
++        if (HAS_GSCALE) inv = fd[e] / (448.0f * 6.0f);
++        for (int p = 0; p < M; ++p) {
++            if (p >= cnt) break;
++            for (int r = 0; r < RPS; ++r) res[r][p] = simd_sum(res[r][p]);
++        }
++        if (lane == 0) {
++            for (int p = 0; p < M; ++p) {
++                if (p >= cnt) break;
++                const int slot = ulist[e * M + p];
++                for (int r = 0; r < RPS; ++r)
++                    eo[slot][r] = float(HAS_GSCALE ? static_cast<T>(res[r][p] * inv)
++                                                   : static_cast<T>(res[r][p]));
++            }
++        }
++    }
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    for (int t = int(lid); t < CH; t += SG * 32) {
++        const int c = c0 + t;
++        float win[W - 1];
++        for (int j = 0; j < W - 1; ++j) win[j] = state[j * N + c];
++        for (int m = 0; m < M; ++m) {
++            // kernels.mlp_tail_step: the route combine (products rounded, summed
++            // in route order), the short convolution with its next state, and
++            // the residual add.
++            float total = 0.0f;
++            {
++                #pragma clang fp contract(off)
++                for (int r = 0; r < TOPK; ++r) {
++                    const float p = eo[m * TOPK + r][t] * wts[m * TOPK + r];
++                    total = p + total;
++                }
++            }
++            const T hidden = static_cast<T>(total);
++            float value = 0;
++            for (int j = 0; j < W; ++j) {
++                int p = j - W + 1;
++                float xv = p < 0 ? float(win[p + W - 1]) : float(hidden);
++                float w = conv_w[c * W + j];
++                value = value + xv * w;
++            }
++            const float xt = float(hidden);
++            const T conv = T((value + xt) / divisor);
++            for (int j = 0; j < W - 2; ++j) win[j] = win[j + 1];
++            win[W - 2] = xt;
++            for (int j = 0; j < W - 1; ++j) states[(m * (W - 1) + j) * N + c] = win[j];
++            out[m * N + c] = static_cast<T>(residual[m * N + c] + float(conv));
++        }
++    }
++"""
++
++_MOE_M = {}
++
++
++def _moe_kernel(name, src, inputs, outputs, route_scale=None, gate_cap=None, up_cap=None):
++    from . import moe_kernels as mk
++
++    key = (name, route_scale, gate_cap, up_cap)
++    k = _MOE_M.get(key)
++    if k is None:
++        s = src
++        if route_scale is not None:
++            s = (s.replace("SUM_EXPR", mk.SUM_ORDERS["seq"])
++                 .replace("ROUTE_SCALE", mk._flit(route_scale)))
++        if gate_cap is not None:
++            s = s.replace("GCAP", mk._flit(gate_cap)).replace("UCAP", mk._flit(up_cap))
++        k = mx.fast.metal_kernel(
++            name=f"inkling2_verify_{name}_{len(_MOE_M)}",
++            input_names=inputs,
++            output_names=outputs,
++            header=mk._HEADER + _MOE_M_HEADER,
++            ensure_row_contiguous=True,
++            compile_options={"math_mode": "safe"},
++            source=s,
++        )
++        _MOE_M[key] = k
++    return k
++
++
++def moe_rows(x, neg, scores, moe, states, conv_weight, residual, width):
++    """M decode rows of SparseMoE.fused_decode + the MLP tail.
++    x (M, K) bf16 MoE inputs; neg, scores (M, E) the router outputs per row;
++    states (1, W - 1, C) FP32 the MLP conv state before row 0; residual (M, C)
++    FP32. Returns (out (M, C) bf16, states after each row (M, W - 1, C))."""
++    import math
++    from . import moe_kernels as mk
++
++    sw = moe.switch_mlp
++    m, k = x.shape
++    top_k = moe.top_k
++    ne = neg.shape[-1]
++    wg, sgs, fg, bits, gs = mk._proj_params(sw.gate_proj)
++    wu, sus, fu, _, _ = mk._proj_params(sw.up_proj)
++    wd, sds, fd, bits_d, gs_d = mk._proj_params(sw.down_proj)
++    n = wg.shape[1]
++    c = wd.shape[1]
++    has_gs = fg is not None
++    idx, wts = _moe_kernel("moe_route", _MOE_ROUTE_SRC, ["neg", "scores"], ["idx", "wts"],
++                           route_scale=moe.route_scale)(
++        inputs=[neg, scores],
++        template=[("NE", ne), ("TOPK", top_k), ("TGS", 128)],
++        grid=(m * 128, 1, 1), threadgroup=(128, 1, 1),
++        output_shapes=[(m, top_k), (m, top_k)], output_dtypes=[mx.uint32, mx.float32],
++    )
++    ulist, ucount = _moe_kernel("moe_union", _MOE_UNION_SRC, ["idx"], ["ulist", "ucount"])(
++        inputs=[idx],
++        template=[("NE", ne), ("TOPK", top_k), ("M", m)],
++        grid=(ne, 1, 1), threadgroup=(ne, 1, 1),
++        output_shapes=[(ne, m), (ne,)], output_dtypes=[mx.int32, mx.int32],
++    )
++    rps, sg = 4, 8
++    rows_tg = sg * rps
++    assert n % rows_tg == 0 and c % rps == 0
++    dummy = wts
++    act = _moe_kernel("moe_gate_up_m", _MOE_GU_M_SRC,
++                      ["x", "ulist", "ucount", "wg", "sg", "fg", "wu", "su", "fu"], ["act"],
++                      gate_cap=sw.activation.gate_cap, up_cap=sw.activation.up_cap)(
++        inputs=[x, ulist, ucount, wg, sgs, fg if has_gs else dummy, wu, sus,
++                fu if has_gs else dummy],
++        template=[("T", x.dtype), ("K", k), ("N", n), ("BITS", bits), ("GS", gs),
++                  ("HAS_GSCALE", has_gs), ("FAST", mk._fast(k, bits)), ("RPS", rps),
++                  ("SG", sg), ("NE", ne), ("TOPK", top_k), ("M", m)],
++        grid=(ne * (n // rows_tg) * sg * 32, 1, 1), threadgroup=(sg * 32, 1, 1),
++        output_shapes=[(m * top_k, n)], output_dtypes=[x.dtype],
++    )[0]
++    has_gs_d = fd is not None
++    out, st = _moe_kernel("moe_down_tail_m", _MOE_DT_M_SRC,
++                          ["act", "ulist", "ucount", "wts", "wd", "sd", "fd", "state",
++                           "conv_w", "residual", "divisor"], ["out", "states"])(
++        inputs=[act, ulist, ucount, wts, wd, sds, fd if has_gs_d else dummy, states,
++                conv_weight, residual, mx.array(math.sqrt(width + 1), mx.float32)],
++        template=[("T", x.dtype), ("K", n), ("N", c), ("BITS", bits_d), ("GS", gs_d),
++                  ("HAS_GSCALE", has_gs_d), ("FAST", mk._fast(n, bits_d)), ("RPS", rps),
++                  ("SG", sg), ("NE", ne), ("TOPK", top_k), ("M", m), ("W", width)],
++        grid=((c // rps) * sg * 32, 1, 1), threadgroup=(sg * 32, 1, 1),
++        output_shapes=[(m, c), (m, width - 1, c)], output_dtypes=[x.dtype, mx.float32],
++    )
++    return out, st
++
++
++# --------------------------------------------------------------------------
++# global_rows_shared with lane-parallel scalars: a simdgroup owns NP = RPS * G
++# (row, head) pairs. Per key the NP per-lane partial dot products (the decode
++# kernel's 4 FMAs per lane) are reduced with a reduce-scatter whose butterfly
++# order is simd_sum's (XOR_DESC: distances 16, 8, 4, 2, 1; else 1 .. 16), so
++# each pair's score is bitwise the decode kernel's simd_sum, held by its owner
++# lane. The owner lane runs the decode kernel's online-softmax update for its
++# pair; f and p are broadcast and every lane updates acc with the decode
++# kernel's expression. Only the work distribution over lanes changes.
++
++_GPS2 = r"""
++        constexpr int G = HQ / HKV;
++        constexpr int E = D / 32;
++        constexpr int NP = RPS * G;
++        const uint lane = thread_index_in_simdgroup;
++        const int sidx = int(simdgroup_index_in_threadgroup);
++        const int sg = sidx % SG;
++        const int rg = sidx / SG;
++        const int block = threadgroup_position_in_grid.x;
++        const int g = threadgroup_position_in_grid.y;
++        const int base = new_base[0];
++        const int start = block * BS;
++        const int Smax = base + R;
++        if (start >= Smax) return;
++        const int end_max = min(start + BS, Smax);
++        const float sc = scale;
++
++        // Which pair the reduce-scatter leaves in this lane.
++        int my = 0;
++        {
++            int lo = 0, len = P2;
++            for (int st = 0; st < 5; ++st) {
++                const ushort d = XOR_DESC ? ushort(16 >> st) : ushort(1 << st);
++                if (len > 1) {
++                    len >>= 1;
++                    if (lane & d) lo += len;
++                }
++            }
++            my = lo;
++        }
++        const int my_r = rg * RPS + my / G;
++        const int my_h = my % G;
++        const bool owner = my < NP && my_r < R;
++        float qv[NP][E];
++        float acc[NP][E];
++        for (int i = 0; i < NP; ++i) {
++            const int r = min(rg * RPS + i / G, R - 1);
++            const int h = i % G;
++            for (int e = 0; e < E; ++e) {
++                qv[i][e] = float(q[(r * HQ + g * G + h) * D + lane * E + e]) * sc;
++                acc[i][e] = 0.0f;
++            }
++        }
++        float m_own = -INFINITY, l_own = 0.0f;
++        const device T* k_head = k + g * k_strides[1];
++        const device T* v_head = v + g * v_strides[1];
++        int j = start + sg;
++        vec<T, E> k_next = vec<T, E>(0), v_next = vec<T, E>(0);
++        if (j < end_max) {
++            k_next = *(const device vec<T, E>*)(k_head + size_t(j) * k_strides[2] + lane * E);
++            v_next = *(const device vec<T, E>*)(v_head + size_t(j) * v_strides[2] + lane * E);
++        }
++        for (; j < end_max; j += SG) {
++            float kv[E], vv[E];
++            for (int e = 0; e < E; ++e) {
++                kv[e] = float(k_next[e]);
++                vv[e] = float(v_next[e]);
++            }
++            if (j >= base) {
++                for (int e = 0; e < E; ++e) {
++                    kv[e] = float(k_new[((j - base) * HKV + g) * D + lane * E + e]);
++                    vv[e] = float(v_new[((j - base) * HKV + g) * D + lane * E + e]);
++                }
++            }
++            if (j + SG < end_max) {
++                const size_t jn = size_t(j + SG);
++                k_next = *(const device vec<T, E>*)(k_head + jn * k_strides[2] + lane * E);
++                v_next = *(const device vec<T, E>*)(v_head + jn * v_strides[2] + lane * E);
++            }
++            float part[P2];
++            for (int i = 0; i < P2; ++i) {
++                float s = 0.0f;
++                if (i < NP)
++                    for (int e = 0; e < E; ++e) s += qv[i][e] * kv[e];
++                part[i] = s;
++            }
++            // reduce-scatter (simd_sum's butterfly per pair), stage lengths
++            // known at compile time so part[] stays in registers.
++#define RS_STAGE(ST) {                                                          \
++                constexpr ushort d = XOR_DESC ? ushort(16 >> (ST)) : ushort(1 << (ST)); \
++                constexpr int LEN = (P2 >> (ST)) > 0 ? (P2 >> (ST)) : 1;        \
++                constexpr int HL = LEN > 1 ? LEN / 2 : 1;                        \
++                const bool up = (lane & d) != 0;                                 \
++                if (LEN > 1) {                                                   \
++                    for (int t = 0; t < HL; ++t) {                               \
++                        const float keep = up ? part[t + HL] : part[t];          \
++                        const float send = up ? part[t] : part[t + HL];          \
++                        part[t] = keep + simd_shuffle_xor(send, d);              \
++                    }                                                            \
++                } else {                                                         \
++                    part[0] = part[0] + simd_shuffle_xor(part[0], d);            \
++                }                                                                \
++            }
++            RS_STAGE(0) RS_STAGE(1) RS_STAGE(2) RS_STAGE(3) RS_STAGE(4)
++#undef RS_STAGE
++            float f = 1.0f, p = 0.0f;
++            bool live = false;
++            if (owner) {
++                const int S = base + my_r + 1;
++                if (j < S) {
++                    live = true;
++                    float s = part[0];
++                    const int dist = S - 1 - j;
++                    if (dist < REL) s += float(rel[(my_r * HQ + g * G + my_h) * REL + dist]);
++                    const float mn = max(m_own, s);
++                    f = metal::exp(m_own - mn);
++                    p = metal::exp(s - mn);
++                    l_own = l_own * f + p;
++                    m_own = mn;
++                }
++            }
++            for (int i = 0; i < NP; ++i) {
++                const int r = rg * RPS + i / G;
++                if (r >= R || j >= base + r + 1) continue;
++                const ushort src = ushort(LANE_OF(i));
++                const float fi = simd_shuffle(f, src);
++                const float pi = simd_shuffle(p, src);
++                for (int e = 0; e < E; ++e) acc[i][e] = acc[i][e] * fi + pi * vv[e];
++            }
++            (void)live;
++        }
++
++        threadgroup float tm[SG][G];
++        threadgroup float tl[SG][G];
++        threadgroup float ta[SG][G][D];
++        for (int rr = 0; rr < R; ++rr) {
++            const int owner_rg = rr / RPS;
++            const int ii = rr % RPS;
++            const bool live_blk = start < base + rr + 1;
++            if (rg == owner_rg) {
++                if (owner && my / G == ii) {
++                    tm[sg][my_h] = m_own;
++                    tl[sg][my_h] = l_own;
++                }
++                for (int h = 0; h < G; ++h)
++                    for (int e = 0; e < E; ++e) ta[sg][h][lane * E + e] = acc[ii * G + h][e];
++            }
++            threadgroup_barrier(mem_flags::mem_threadgroup);
++            if (live_blk) {
++                for (uint t = thread_position_in_threadgroup.x; t < uint(G * D); t += SG * RG * 32) {
++                    const int h = t / D, d = t % D;
++                    float M = -INFINITY;
++                    for (int s = 0; s < SG; ++s) M = max(M, tm[s][h]);
++                    float L = 0.0f, A = 0.0f;
++                    if (M > -INFINITY) {
++                        for (int s = 0; s < SG; ++s) {
++                            const float w = metal::exp(tm[s][h] - M);
++                            L += tl[s][h] * w;
++                            A += ta[s][h][d] * w;
++                        }
++                    }
++                    const int row = (rr * nbk[0] + block) * HQ + g * G + h;
++                    part_acc[size_t(row) * D + d] = A;
++                    if (d == 0) {
++                        part_max[row] = M;
++                        part_sum[row] = L;
++                    }
++                }
++            }
++            threadgroup_barrier(mem_flags::mem_threadgroup);
++        }
++"""
++
++
++def _lane_of_expr(p2, desc):
++    """C expression: the lane whose reduce-scatter result is pair i."""
++    # Emulate the halving: lane bit for distance d selects the upper half.
++    lanes = {}
++    for lane in range(32):
++        lo, ln = 0, p2
++        for st in range(5):
++            d = (16 >> st) if desc else (1 << st)
++            if ln > 1:
++                ln >>= 1
++                if lane & d:
++                    lo += ln
++        lanes.setdefault(lo, lane)
++    table = ",".join(str(lanes[i]) for i in range(p2))
++    return table
++
++
++@lru_cache(maxsize=None)
++def _global_partials_shared2(p2, desc):
++    table = _lane_of_expr(p2, desc)
++    src = _GPS2.replace(
++        "LANE_OF(i)", f"lane_of_tab[i]"
++    ).replace(
++        "        constexpr int NP = RPS * G;",
++        "        constexpr int NP = RPS * G;\n"
++        f"        constexpr ushort lane_of_tab[{p2}] = {{{table}}};",
++    )
++    return mx.fast.metal_kernel(
++        name=f"inkling2_verify_global_partials_shared2_{p2}_{int(desc)}",
++        input_names=["q", "k", "v", "rel", "scale", "k_new", "v_new", "new_base", "nbk"],
++        output_names=["part_max", "part_sum", "part_acc"],
++        ensure_row_contiguous=False,
++        source=src,
++    )
++
++
++def global_rows_shared2(q, k, v, k_new, v_new, base, rel, sinks, gate, *, scale, rps=2,
++                        desc=True):
++    """global_rows_shared with lane-parallel per-pair scalars (see _GPS2)."""
++    R, hq, d = q.shape
++    hkv, cap = k.shape[1], k.shape[2]
++    nb = (cap + _k._DECODE_BLOCK - 1) // _k._DECODE_BLOCK
++    assert d % 32 == 0 and nb <= 3072 and _k._COMBINE2 and hq // hkv == 3
++    rps = max(1, min(int(rps), R))
++    rg = (R + rps - 1) // rps
++    np_ = rps * (hq // hkv)
++    p2 = 1
++    while p2 < np_:
++        p2 *= 2
++    assert p2 <= 32
++    sg = _k._DECODE_SIMDGROUPS
++    assert sg * rg * 32 <= 1024
++    base = base.reshape(1).astype(mx.int32)
++    lengths = base + 1 + mx.arange(R, dtype=mx.int32)
++    part_max, part_sum, part_acc = _global_partials_shared2(p2, bool(desc))(
++        inputs=[mx.contiguous(q), k, v, mx.contiguous(rel), mx.array(scale, dtype=mx.float32),
++                mx.contiguous(k_new), mx.contiguous(v_new), base, mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("REL", rel.shape[-1]),
++                  ("BS", _k._DECODE_BLOCK), ("SG", sg), ("R", R), ("RPS", rps), ("RG", rg),
++                  ("P2", p2), ("XOR_DESC", bool(desc))],
++        grid=(nb * 32 * sg * rg, hkv, 1),
++        threadgroup=(32 * sg * rg, 1, 1),
++        output_shapes=[(R * nb * hq,), (R * nb * hq,), (R * nb * hq, d)],
++        output_dtypes=[mx.float32, mx.float32, mx.float32],
++    )
++    csizes = mx.stack([lengths, (lengths + (_k._DECODE_BLOCK - 1)) // _k._DECODE_BLOCK], axis=1)
++    return _global_combine()(
++        inputs=[part_max, part_sum, part_acc, sinks.astype(mx.float32), csizes,
++                mx.contiguous(gate), mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("DT", 32),
++                  ("NBMAX", _NBMAX), ("HAS_GATE", True)],
++        grid=(hq * d, 1, R),
++        threadgroup=(32, 1, 1),
++        output_shapes=[(R, hq, d)],
++        output_dtypes=[q.dtype],
++    )[0]
++
++
++# global_rows with the rows adjacent in the grid (threadgroup x = block * R +
++# row): the R threadgroups of one key block are dispatched together, so the
++# block's K/V is fetched from DRAM once and re-read from cache. Same kernel
++# body (only the block/row indices are taken from x).
++_GPX = _sub(_GP, "const int vrow = threadgroup_position_in_grid.z;",
++            "const int vrow = int(threadgroup_position_in_grid.x) % RR;")
++_GPX = _sub(_GPX, "const int block = threadgroup_position_in_grid.x;",
++            "const int block = int(threadgroup_position_in_grid.x) / RR;")
++
++
++@lru_cache(maxsize=None)
++def _global_partials_x():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_global_partials_x",
++        input_names=["q", "k", "v", "rel", "key_start", "sizes", "scale", "k_new", "v_new",
++                     "new_base", "nbk"],
++        output_names=["part_max", "part_sum", "part_acc"],
++        ensure_row_contiguous=False,
++        source=_GPX,
++    )
++
++
++def global_rows_x(q, k, v, k_new, v_new, base, rel, sinks, gate, *, scale):
++    """global_rows with the rows of a key block adjacent in the dispatch."""
++    R, hq, d = q.shape
++    hkv, cap = k.shape[1], k.shape[2]
++    nb = (cap + _k._DECODE_BLOCK - 1) // _k._DECODE_BLOCK
++    assert d % 32 == 0 and nb <= 3072 and _k._COMBINE2
++    base = base.reshape(1).astype(mx.int32)
++    lengths = base + 1 + mx.arange(R, dtype=mx.int32)
++    zero = mx.zeros((1,), mx.int32)
++    part_max, part_sum, part_acc = _global_partials_x()(
++        inputs=[mx.contiguous(q), k, v, mx.contiguous(rel), zero, lengths,
++                mx.array(scale, dtype=mx.float32), mx.contiguous(k_new), mx.contiguous(v_new),
++                base, mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("REL", rel.shape[-1]),
++                  ("BS", _k._DECODE_BLOCK), ("SG", _k._DECODE_SIMDGROUPS), ("NEWROW", True),
++                  ("RR", R)],
++        grid=(nb * R * 32 * _k._DECODE_SIMDGROUPS, hkv, 1),
++        threadgroup=(32 * _k._DECODE_SIMDGROUPS, 1, 1),
++        output_shapes=[(R * nb * hq,), (R * nb * hq,), (R * nb * hq, d)],
++        output_dtypes=[mx.float32, mx.float32, mx.float32],
++    )
++    csizes = mx.stack([lengths, (lengths + (_k._DECODE_BLOCK - 1)) // _k._DECODE_BLOCK], axis=1)
++    return _global_combine()(
++        inputs=[part_max, part_sum, part_acc, sinks.astype(mx.float32), csizes,
++                mx.contiguous(gate), mx.array([nb], dtype=mx.int32)],
++        template=[("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv), ("DT", 32),
++                  ("NBMAX", _NBMAX), ("HAS_GATE", True)],
++        grid=(hq * d, 1, R),
++        threadgroup=(32, 1, 1),
++        output_shapes=[(R, hq, d)],
++        output_dtypes=[q.dtype],
++    )[0]
++
++
++# --------------------------------------------------------------------------
++# Light per-position kernels for M rows (grid z = row): each threadgroup is the
++# decode kernel's threadgroup for one row; only the row's data pointers move.
++
++def _rows_prefix(ptrs):
++    lines = ["    const int vrow_ = int(threadgroup_position_in_grid.z);"]
++    lines += [f"    {name} += vrow_ * ({stride});" for name, stride in ptrs]
++    return "\n".join(lines) + "\n"
++
++
++_S_PTRS = [(f"s{i}", "D") for i in range(8)]
++
++
++@lru_cache(maxsize=None)
++def _attn_res_rows(kind):
++    if kind == "q1_norm":
++        src = _rows_prefix(_S_PTRS + [("keys", "NS * D"), ("normed", "D")]) + _k._q1_list_norm_source()
++        names_in = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "query", "scale", "nw", "eps"]
++        names_out = ["normed", "keys"]
++        header = ""
++    elif kind == "q1":
++        src = _rows_prefix(_S_PTRS + [("keys", "NS * D"), ("out", "D")]) + _k._ATTN_RES_Q1_LIST_SRC
++        names_in = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "query", "scale"]
++        names_out = ["out", "keys"]
++        header = ""
++    else:
++        src = _rows_prefix(_S_PTRS + [("keys", "NS * D"), ("out", "Q * D")]) + _k._ATTN_RES_MULTI_SRC
++        names_in = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "query", "scale"]
++        names_out = ["out", "keys"]
++        header = "#include <metal_simdgroup_matrix>\n"
++    return mx.fast.metal_kernel(
++        name=f"inkling2_verify_attn_res_rows_{kind}",
++        input_names=names_in,
++        output_names=names_out,
++        header=header,
++        compile_options={"math_mode": "safe"},
++        source=src,
++    )
++
++
++def _flat_states(states, m, d):
++    flat = [mx.contiguous(a.reshape(m, d)) for a in states]
++    return flat + [flat[0]] * (8 - len(flat))
++
++
++def attn_res_q1_norm_rows(states, query, scale, weight, eps, dtype):
++    """kernels.attention_residual_q1_list_norm for M positions: states are
++    2..8 arrays of M x D values (row m = position m). Returns (M, D)."""
++    n = len(states)
++    d = states[-1].shape[-1]
++    m = states[-1].size // d
++    flat = _flat_states(states, m, d)
++    normed, _ = _attn_res_rows("q1_norm")(
++        inputs=[*flat, query, mx.array(scale, mx.float32),
++                flat[0] if weight is None else weight, mx.array(eps, mx.float32)],
++        template=[("NS", n), ("D", d), ("O", dtype), ("HAS_W", weight is not None)],
++        grid=(1024, 1, m), threadgroup=(1024, 1, 1),
++        output_shapes=[(m, d), (m * n, d)], output_dtypes=[dtype, mx.float32],
++    )
++    return normed
++
++
++def attn_res_q1_rows(states, query, scale):
++    """kernels.attention_residual_q1_list for M positions. Returns (M, D) FP32."""
++    n = len(states)
++    d = states[-1].shape[-1]
++    m = states[-1].size // d
++    flat = _flat_states(states, m, d)
++    out, _ = _attn_res_rows("q1")(
++        inputs=[*flat, query, mx.array(scale, mx.float32)],
++        template=[("NS", n), ("D", d)],
++        grid=(1024, 1, m), threadgroup=(1024, 1, 1),
++        output_shapes=[(m, d), (m * n, d)], output_dtypes=[mx.float32, mx.float32],
++    )
++    return out
++
++
++def attn_res_multi_rows(states, query, scale):
++    """kernels.attention_residual_multi for M positions. Returns (M, Q, D) FP32."""
++    n = len(states)
++    d = states[-1].shape[-1]
++    m = states[-1].size // d
++    q = query.shape[0]
++    parts, iters, last = _k._splitk_plan(n, q, d)
++    flat = _flat_states(states, m, d)
++    out, _ = _attn_res_rows("multi")(
++        inputs=[*flat, query, mx.array(scale, mx.float32)],
++        template=[("NS", n), ("Q", q), ("D", d), ("PARTS", parts), ("PITER", iters),
++                  ("K_LAST_ITER", last)],
++        grid=(1024, 1, m), threadgroup=(1024, 1, 1),
++        output_shapes=[(m * q, d), (m * n, d)], output_dtypes=[mx.float32, mx.float32],
++    )
++    return out.reshape(m, q, d)
++
++
++# Sliding k/v short convolution for M rows: row r is short_convolution_step
++# on the state after rows 0..r-1 (the window [state; x_0 .. x_r]); returns the
++# outputs (M, C) and the state after every row (M, W - 1, C).
++_CONV_ROWS_SRC = r"""
++        uint i = thread_position_in_grid.x;
++        constexpr int WS = W - 1;
++        if (i >= uint(M * C)) return;
++        int c = i % C, r = i / C;
++        // inkling2_virtual_short_convolution's arithmetic for one unmasked token.
++        float value = 0;
++        for (int j = 0; j < W; ++j) {
++            const int t = r + j;  // window position: < WS state rows, then x rows
++            float xv = t < WS ? float(state[t * C + c]) : float(x[(t - WS) * C + c]);
++            float w = weight[c * weight_strides[0] + j * weight_strides[1]];
++            value = value + xv * w;
++        }
++        const float xt = float(x[r * C + c]);
++        out[r * C + c] = T((value + xt) / divisor);
++        for (int j = 0; j < WS; ++j) {
++            const int t = r + 1 + j;
++            states[(r * WS + j) * C + c] = t < WS ? state[t * C + c] : float(x[(t - WS) * C + c]);
++        }
++"""
++
++
++@lru_cache(maxsize=None)
++def _conv_rows():
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_conv_rows",
++        input_names=["state", "weight", "x", "divisor"],
++        output_names=["out", "states"],
++        ensure_row_contiguous=False,
++        compile_options={"math_mode": "safe"},
++        source=_CONV_ROWS_SRC,
++    )
++
++
++def conv_rows(state, weight, x, width):
++    """state (1, W - 1, C) FP32, x (M, C). Returns (out (M, C), states (M, W - 1, C))."""
++    import math
++
++    m, c = x.shape
++    return _conv_rows()(
++        inputs=[mx.contiguous(state), weight, mx.contiguous(x),
++                mx.array(math.sqrt(width + 1), mx.float32)],
++        template=[("T", x.dtype), ("W", width), ("M", m), ("C", c)],
++        grid=(m * c, 1, 1), threadgroup=(256, 1, 1),
++        output_shapes=[(m, c), (m, width - 1, c)], output_dtypes=[x.dtype, mx.float32],
++    )
++
++
++@lru_cache(maxsize=None)
++def _router_rows():
++    body = _sub(_k._ROUTER_SCORES_SRC, "const int out_row = threadgroup_position_in_grid.x * TM;",
++                "const int out_row = threadgroup_position_in_grid.x * TM;\n"
++                "        const int vrow_ = int(threadgroup_position_in_grid.z);\n"
++                "        x += vrow_ * K;\n        scores += vrow_ * E;\n        neg += vrow_ * E;")
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_router_rows",
++        input_names=["x", "w", "bias"],
++        output_names=["scores", "neg"],
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=body,
++    )
++
++
++def router_rows(x, weight, bias):
++    """kernels.router_scores for M rows x (M, K). Returns (scores, neg) (M, E)."""
++    e, k = weight.shape
++    m = x.size // k
++    return _router_rows()(
++        inputs=[x.reshape(m, k), weight, bias],
++        template=[("K", k), ("E", e)],
++        grid=(e // 4 * 256, 1, m), threadgroup=(256, 1, 1),
++        output_shapes=[(m, e), (m, e)], output_dtypes=[mx.float32, mx.float32],
++    )
++
++
++@lru_cache(maxsize=None)
++def _msg_rows(which):
++    from ..inkling2_loop import msg_kernels as mk
++
++    if which == "down":
++        src = _sub(mk._DOWN_SRC, "const int tg = threadgroup_position_in_grid.x;",
++                   "const int tg = threadgroup_position_in_grid.x;\n"
++                   "    const int vrow_ = int(threadgroup_position_in_grid.z);\n"
++                   "    h0 += vrow_ * H; h1 += vrow_ * H; h2 += vrow_ * H;\n"
++                   "    m0 += vrow_ * H; m1 += vrow_ * H; m2 += vrow_ * H;\n"
++                   "    gi += vrow_ * GN * R;")
++        return mx.fast.metal_kernel(
++            name="inkling2_verify_msg_down_rows", input_names=["h0", "h1", "h2", "m0", "m1", "m2", "w", "eps"],
++            output_names=["gi"], ensure_row_contiguous=True, compile_options={"math_mode": "safe"},
++            source=src)
++    src = _sub(mk._UP_SRC, "const uint sg = simdgroup_index_in_threadgroup;",
++               "const uint sg = simdgroup_index_in_threadgroup;\n"
++               "    const int vrow_ = int(threadgroup_position_in_grid.z);\n"
++               "    h0 += vrow_ * H; h1 += vrow_ * H; h2 += vrow_ * H;\n"
++               "    m0 += vrow_ * H; m1 += vrow_ * H; m2 += vrow_ * H;\n"
++               "    gi += vrow_ * GN * R;\n    out += vrow_ * GN * H;")
++    return mx.fast.metal_kernel(
++        name="inkling2_verify_msg_up_rows", input_names=["gi", "wf", "wg", "h0", "h1", "h2", "m0", "m1", "m2"],
++        output_names=["out"], ensure_row_contiguous=True, compile_options={"math_mode": "safe"},
++        source=src)
++
++
++def message_gates_rows(hiddens, messages, down, forget, gain, eps, *, combine=0, sgt=4):
++    """msg_kernels.message_gates for M rows: hiddens / messages G arrays of
++    M x H FP32 values. Returns (M, G, H) FP32."""
++    g = len(hiddens)
++    r, k = down.shape[-2:]
++    h = forget.shape[-2]
++    m = hiddens[0].size // h
++    hs = [mx.contiguous(a.reshape(m, h)) for a in hiddens]
++    ms = [mx.contiguous(a.reshape(m, h)) for a in messages]
++    hs += [hs[0]] * (3 - g)
++    ms += [ms[0]] * (3 - g)
++    gi = _msg_rows("down")(
++        inputs=[*hs, *ms, down, mx.array(eps, mx.float32)],
++        template=[("H", h), ("R", r), ("GN", g)],
++        grid=(g * (r // 4) * 256, 1, m), threadgroup=(256, 1, 1),
++        output_shapes=[(m * g * r,)], output_dtypes=[mx.float32],
++    )[0]
++    return _msg_rows("up")(
++        inputs=[gi, forget, gain, *hs, *ms],
++        template=[("H", h), ("R", r), ("SGT", sgt), ("COMBINE", combine), ("GN", g)],
++        grid=(g * (h // 32) * 32, 1, m), threadgroup=(sgt * 32, 1, 1),
++        output_shapes=[(m, g, h)], output_dtypes=[mx.float32],
++    )[0]
+diff -ruN a/mlx_vlm/speculative/cache_state.py b/mlx_vlm/speculative/cache_state.py
+--- a/mlx_vlm/speculative/cache_state.py
++++ b/mlx_vlm/speculative/cache_state.py
+@@ -216,6 +216,8 @@
+     """Release and restore an unfinished transaction returned by a target."""
+     if isinstance(state, SpeculativeCacheTransaction):
+         state.abort()
++    elif callable(getattr(state, "abort", None)):
++        state.abort()
+ 
+ 
+ def commit_speculative_round(model, caches, state, accepted, block_size):
+@@ -228,6 +230,8 @@
+         values = list(accepted)
+     if isinstance(state, SpeculativeCacheTransaction):
+         state.commit([value + 1 for value in values])
++    elif callable(getattr(state, "commit", None)):
++        state.commit([value + 1 for value in values])
+     elif any(value < block_size - 1 for value in values):
+         model.rollback_speculative_cache(caches, state, accepted, block_size)
+ 
+diff -ruN a/mlx_vlm/speculative/dflash.py b/mlx_vlm/speculative/dflash.py
+--- a/mlx_vlm/speculative/dflash.py
++++ b/mlx_vlm/speculative/dflash.py
+@@ -121,6 +121,14 @@
+ ):
+     gdn_states = None
+     try:
++        compiled_greedy = getattr(lm, "speculative_verify_dflash_greedy", None)
++        if callable(compiled_greedy):
++            result = compiled_greedy(
++                verify_input, prompt_cache, target_layer_ids
++            )
++            if result is not None:
++                return result
++
+         verify_hidden = getattr(lm, "speculative_verify_dflash_hidden", None)
+         argmax_from_hidden = getattr(lm, "speculative_argmax_from_hidden", None)
+         if callable(verify_hidden) and callable(argmax_from_hidden):
+@@ -523,6 +531,117 @@
+         return tokens
+ 
+ 
++class _PromptLookup:
++    """Prompt-lookup proposals (MLX_VLM_INKLING2_NGRAM=n): the continuation of
++    the most recent earlier occurrence of the last n..NMAX emitted tokens in
++    the prompt or the output. Used for a round when an occurrence of at least
++    n tokens exists; the DSpark draft fills the rest of the block. Proposals
++    only change speed (the verifier decides every token)."""
++
++    NMAX = 12
++
++    def __init__(self, prompt_ids, nmin):
++        import numpy as np
++
++        self.np = np
++        self.prompt = np.asarray(prompt_ids, dtype=np.int32).reshape(-1)
++        self.gen = []
++        self.nmin = int(nmin)
++        self.used = 0
++
++    def _matches(self, seq, tail, limit):
++        """(length, position after the match) of the longest (then latest)
++        occurrence in seq[:limit] of a suffix of tail of length >= nmin."""
++        np = self.np
++        n0 = self.nmin
++        if limit <= n0 or len(tail) < n0:
++            return None
++        pat = np.asarray(tail[-n0:], dtype=np.int32)
++        cand = np.flatnonzero(seq[: limit - n0 + 1] == pat[0])
++        for t in range(1, n0):
++            if cand.size == 0:
++                return None
++            cand = cand[seq[cand + t] == pat[t]]
++        if cand.size == 0:
++            return None
++        length = np.full(cand.shape, n0)
++        alive = np.ones(cand.shape, dtype=bool)
++        for t in range(len(tail) - n0):
++            idx = cand - 1 - t
++            ok = alive & (idx >= 0)
++            ok[ok] = seq[idx[ok]] == tail[-n0 - 1 - t]
++            alive = ok
++            length += alive
++        best = int(np.max(length))
++        i = int(cand[np.flatnonzero(length == best)[-1]])
++        return best, i + n0
++
++    def propose(self, count):
++        np = self.np
++        tail = (self.prompt[-self.NMAX :].tolist() + self.gen)[-self.NMAX :]
++        gen = np.asarray(self.gen, dtype=np.int32)
++        # the output (not its own tail) first, then the prompt
++        best = None
++        g = self._matches(gen, tail, len(gen) - 1) if len(gen) > self.nmin else None
++        if g is not None:
++            best = (g[0], gen[g[1] : g[1] + count].tolist())
++        p = self._matches(self.prompt, tail, len(self.prompt) - 1)
++        if p is not None and (best is None or p[0] > best[0]):
++            out = self.prompt[p[1] : p[1] + count].tolist()
++            if len(out) < count:
++                out += self.gen[: count - len(out)]
++            best = (p[0], out)
++        return best[1][:count] if best is not None and best[1] else None
++
++
++class _AdaptiveBlock:
++    """Block size per round from candidates (MLX_VLM_INKLING2_ADAPT_K="4,6,8"):
++    maximize (1 + sum_j P(accepted run >= j)) / round time over the
++    candidates, with the conditional acceptance of each proposal position
++    counted over the rounds that reached it and each candidate's round time
++    measured (EMA; the first round of a candidate, which may compile, is not
++    timed; untried candidates use the fastest measured time). Every block size
++    is exact under greedy verification: this only changes speed."""
++
++    def __init__(self, cands, prior=0.75, weight=2.0):
++        self.cands = sorted(set(int(c) for c in cands if int(c) >= 2))
++        self.reach = [0.0] * (max(self.cands) + 1)
++        self.acc = [0.0] * (max(self.cands) + 1)
++        self.prior, self.weight = prior, weight
++        self.time = {}
++        self.seen = set()
++        self.history = []
++
++    def choose(self, limit):
++        cands = [c for c in self.cands if c <= limit] or [min(self.cands[0], limit)]
++        if not self.time:
++            return max(cands)
++        fallback = min(self.time.values())
++        best, best_rate = cands[0], -1.0
++        for k in cands:
++            p, e = 1.0, 1.0
++            for j in range(1, k):
++                p *= (self.acc[j] + self.prior * self.weight) / (self.reach[j] + self.weight)
++                e += p
++            rate = e / self.time.get(k, fallback)
++            if rate > best_rate:
++                best, best_rate = k, rate
++        return best
++
++    def record(self, k, accepted, seconds):
++        for j in range(1, k):
++            self.reach[j] += 1
++            if accepted >= j:
++                self.acc[j] += 1
++            else:
++                break
++        if k in self.seen and seconds is not None:
++            t = self.time.get(k)
++            self.time[k] = seconds if t is None else 0.7 * t + 0.3 * seconds
++        self.seen.add(k)
++        self.history.append(k)
++
++
+ def _dflash_rounds(
+     model: nn.Module,
+     draft_model: nn.Module,
+@@ -575,14 +694,41 @@
+         thinking_budget_criteria(first_bonus)
+     b = first_bonus
+     emitted = 1  # the first bonus has already been yielded by the caller
++    lookup = None
++    _nmin = int(__import__("os").environ.get("MLX_VLM_INKLING2_NGRAM", "0"))
++    _ngram_block = int(__import__("os").environ.get("MLX_VLM_INKLING2_NGRAM_BLOCK", "0"))
++    _ids = draft_model.__dict__.pop("_lookup_prompt_ids", None)
++    if _nmin > 0 and _ids is not None and greedy_sampling:
++        lookup = _PromptLookup(_ids.tolist(), _nmin)
++        lookup.gen.append(int(b))
++        draft_model.__dict__["_lookup"] = lookup
++
++    _adapt = __import__("os").environ.get("MLX_VLM_INKLING2_ADAPT_K", "")
++    adapt = _AdaptiveBlock(_adapt.split(",")) if _adapt and greedy_sampling else None
++    if adapt is not None:
++        draft_model.__dict__["_adapt"] = adapt
++    import time as _time
+ 
++    if __import__("os").environ.get("MLX_VLM_INKLING2_ROUND_PROFILE", "0") == "1":
++        draft_model.__dict__["_round_profile"] = {}
+     while emitted < max_tokens:
++        _t_round = _time.perf_counter()
+         bs = _dflash_next_block_size(
+             draft_model,
+             block_total,
+             max_tokens - emitted + 1,
+             (initial_block_size if use_model_initial_block_size else None),
+         )
++        if adapt is not None:
++            bs = adapt.choose(max_tokens - emitted + 1)
++        cand = None
++        if lookup is not None:
++            # A long prompt-lookup continuation gets a bigger block
++            # (MLX_VLM_INKLING2_NGRAM_BLOCK; its tokens lead the proposals).
++            big = min(_ngram_block, max_tokens - emitted + 1)
++            cand = lookup.propose(max(bs, big) - 1)
++            if cand and big > bs and len(cand) >= big - 1:
++                bs = big
+         if bs <= 1:
+             break
+ 
+@@ -611,6 +757,20 @@
+             token_dtype,
+             **draft_kwargs,
+         )
++        _prof = draft_model.__dict__.get("_round_profile")
++        if _prof is not None:
++            mx.eval(draft_tokens)
++            _prof.setdefault("draft", []).append(_time.perf_counter() - _t_round)
++        if lookup is not None:
++            cand = cand[: bs - 1] if cand else None
++            if cand:
++                lookup.used += 1
++                head = mx.array([cand], dtype=draft_tokens.dtype)
++                draft_tokens = (
++                    head
++                    if len(cand) >= bs - 1
++                    else mx.concatenate([head, draft_tokens[:, len(cand) :]], axis=1)
++                )
+         mx.async_eval(draft_tokens)
+ 
+         gdn_states = None
+@@ -638,6 +798,11 @@
+                 mx.async_eval(target_tokens, hidden)
+             else:
+                 mx.async_eval(hidden)
++            if _prof is not None:
++                _t_v = _time.perf_counter()
++                mx.eval(target_tokens, hidden)
++                _prof.setdefault("verify", []).append(_time.perf_counter() - _t_v)
++                _prof.setdefault("bs", []).append(bs)
+ 
+             if greedy_sampling:
+                 accepted, new_tokens = _speculative_walk(
+@@ -659,6 +824,8 @@
+                 [accepted], [new_tokens], [thinking_budget_criteria], [0]
+             )
+             _record_speculative_round(draft_model, accepted, bs - 1)
++            if adapt is not None:
++                adapt.record(bs, accepted, _time.perf_counter() - _t_round)
+ 
+             if accepted < bs - 1:
+                 hidden = hidden[:, : accepted + 1, :]
+@@ -666,6 +833,11 @@
+ 
+             with mx.stream(generation_stream):
+                 commit_speculative_round(lm, prompt_cache, gdn_states, accepted, bs)
++            if _prof is not None:
++                _t_c = _time.perf_counter()
++                mx.eval([c.state for c in prompt_cache])
++                _prof.setdefault("commit", []).append(_time.perf_counter() - _t_c)
++                _prof.setdefault("round", []).append(_time.perf_counter() - _t_round)
+ 
+         except BaseException:
+             abort_speculative_round(gdn_states)
+@@ -677,8 +849,13 @@
+ 
+         # Emit after scheduling the next context projection so its execution
+         # can overlap server-side detokenization and response handling.
+-        for tok in new_tokens:
+-            yield tok, None
++        # An exact verifier (inkling2 exact_verify) also provides each row's
++        # logprobs, bitwise those of non-speculative decoding.
++        row_logprobs = getattr(gdn_states, "logprobs", None)
++        if lookup is not None:
++            lookup.gen.extend(int(t) for t in new_tokens)
++        for i, tok in enumerate(new_tokens):
++            yield tok, (None if row_logprobs is None else row_logprobs[i])
+             emitted += 1
+             if emitted >= max_tokens:
+                 return
+diff -ruN a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
+--- a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
++++ b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
+@@ -7,6 +7,8 @@
+ vllm/models/inkling2/{dspark,ops/dspark}.py (Apache-2.0).
+ """
+ 
++import os
++
+ import mlx.core as mx
+ import mlx.nn as nn
+ import numpy as np
+@@ -31,6 +33,58 @@
+     )
+ 
+ 
++# The global draft layer's context as a fixed ring of the last W target
++# positions (MLX_VLM_INKLING2_DRAFT_CTX_WINDOW; 0 = the whole context in a
++# growing KVCache). The draft attention has no mask, so the key order does not
++# matter: the block's keys go to the slots after the ring and the attention
++# reads the buffer in place (no per-round copy of the context). Only the
++# proposals change (they never enter the target), so output stays exact.
++_CTX_WINDOW = int(os.environ.get("MLX_VLM_INKLING2_DRAFT_CTX_WINDOW", "0"))
++
++
++class DraftWindowCache(KVCache):
++    def __init__(self, window, block):
++        super().__init__()
++        self.window, self.block = int(window), int(block)
++
++    def _alloc(self, like_k, like_v):
++        if self.keys is None:
++            B, H, _, Dk = like_k.shape
++            n = self.window + self.block
++            self.keys = mx.zeros((B, H, n, Dk), like_k.dtype)
++            self.values = mx.zeros((B, H, n, like_v.shape[3]), like_v.dtype)
++
++    def _write(self, start, keys, values):
++        start = mx.array([start], dtype=mx.int32)
++        self.keys = mx.slice_update(self.keys, keys, start, axes=(2,))
++        self.values = mx.slice_update(self.values, values, start, axes=(2,))
++
++    def update_and_fetch(self, keys, values):
++        self._alloc(keys, values)
++        n = keys.shape[2]
++        if n > self.window:
++            self.offset += n - self.window
++            keys, values = keys[..., -self.window :, :], values[..., -self.window :, :]
++            n = self.window
++        pos = self.offset % self.window
++        first = min(n, self.window - pos)
++        self._write(pos, keys[..., :first, :], values[..., :first, :])
++        if first < n:
++            self._write(0, keys[..., first:, :], values[..., first:, :])
++        self.offset += n
++        return None, None
++
++    def attend_kv(self, block_k, block_v):
++        """(keys, values) of the context ring plus the block's rows."""
++        b = block_k.shape[2]
++        if self.offset < self.window:
++            start, end = self.offset, self.offset + b
++        else:
++            start, end = self.window, self.window + b
++        self._write(start, block_k, block_v)
++        return self.keys[..., :end, :], self.values[..., :end, :]
++
++
+ class DraftAttention(nn.Module):
+     def __init__(self, config, local):
+         super().__init__()
+@@ -59,20 +113,22 @@
+         return x.reshape(*x.shape[:2], heads, self.head_dim).transpose(0, 2, 1, 3)
+ 
+     def __call__(self, x, context, cache):
++        if isinstance(cache, DraftWindowCache):
++            return self._call_window(x, context, cache)
+         # Every query sees the whole block and the same window BEFORE its anchor.
+         # Only target context goes into persistent KV; proposals never do.
+-        if self.window and context.shape[1] > self.window:
+-            skip = context.shape[1] - self.window
+-            context = context[:, skip:]
+-            cache.offset += skip
+-        offset = cache.offset
+-        k = self.k_norm_ctx(self._heads(self.k_proj_ctx(context), self.kv_heads))
+-        v = self._heads(self.v_proj_ctx(context), self.kv_heads)
+-        k, v = cache.update_and_fetch(self.rope(k, offset=offset), v)
++        ready = bool(getattr(cache, "_dspark_context_ready", False))
++        if ready:
++            del cache._dspark_context_ready
++            offset = cache.offset
++            k, v = cache.keys, cache.values
++            if isinstance(cache, KVCache):
++                k, v = k[..., :offset, :], v[..., :offset, :]
++        else:
++            k, v, offset = self.prefill_context(context, cache)
+         if isinstance(cache, RotatingKVCache):
+             k, v = cache._temporal_order(k), cache._temporal_order(v)
+             k, v = k[..., -self.window :, :], v[..., -self.window :, :]
+-        offset += context.shape[1]
+         q = self.q_norm(self._heads(self.q_proj(x), self.heads))
+         block_k = self.k_norm(self._heads(self.k_proj(x), self.kv_heads))
+         k = mx.concatenate([k, self.rope(block_k, offset=offset)], axis=2)
+@@ -82,6 +138,34 @@
+         )
+         return self.o_proj(out.transpose(0, 2, 1, 3).reshape(*x.shape[:2], -1))
+ 
++    def _call_window(self, x, context, cache):
++        if getattr(cache, "_dspark_context_ready", False):
++            del cache._dspark_context_ready
++        else:
++            self.prefill_context(context, cache)
++        offset = cache.offset
++        q = self.q_norm(self._heads(self.q_proj(x), self.heads))
++        block_k = self.k_norm(self._heads(self.k_proj(x), self.kv_heads))
++        k, v = cache.attend_kv(
++            self.rope(block_k, offset=offset), self._heads(self.v_proj(x), self.kv_heads)
++        )
++        out = mx.fast.scaled_dot_product_attention(
++            self.rope(q, offset=offset), k, v, scale=self.head_dim**-0.5, mask=None
++        )
++        return self.o_proj(out.transpose(0, 2, 1, 3).reshape(*x.shape[:2], -1))
++
++    def prefill_context(self, context, cache):
++        """Project target features directly into the persistent draft cache."""
++        if self.window and context.shape[1] > self.window:
++            skip = context.shape[1] - self.window
++            context = context[:, skip:]
++            cache.offset += skip
++        offset = cache.offset
++        k = self.k_norm_ctx(self._heads(self.k_proj_ctx(context), self.kv_heads))
++        v = self._heads(self.v_proj_ctx(context), self.kv_heads)
++        k, v = cache.update_and_fetch(self.rope(k, offset=offset), v)
++        return k, v, cache.offset
++
+ 
+ class DraftMLP(nn.Module):
+     def __init__(self, config):
+@@ -192,6 +276,9 @@
+ 
+ class Model(nn.Module):
+     prefer_requested_block_size = True
++    supports_incremental_target_prefill = (
++        os.environ.get("MLX_VLM_INKLING2_INCREMENTAL_DRAFT_PREFILL", "0") == "1"
++    )
+ 
+     def __init__(self, config: ModelConfig):
+         super().__init__()
+@@ -225,12 +312,20 @@
+         if self._target is not target:
+             self.markov_head.fold(target.lm_head)
+             self._target = target
++            if os.environ.get("MLX_VLM_INKLING2_COMPILED_VERIFY", "0") == "1":
++                from ....models.inkling2.fast_decode import prepare_decode
++
++                prepare_decode(target)
+         return self
+ 
+     def make_cache(self):
+         return [
+             (
+-                KVCache()
++                (
++                    DraftWindowCache(_CTX_WINDOW, self.config.block_size)
++                    if _CTX_WINDOW > 0
++                    else KVCache()
++                )
+                 if layer.self_attn.window is None
+                 else RotatingKVCache(max_size=layer.self_attn.window, keep=0)
+             )
+@@ -240,8 +335,96 @@
+     def reset(self, target_model):
+         self.bind(target_model)
+         self.accept_lens, self.draft_lens = [], []
++        prepared = self.__dict__.pop("_prepared_target_cache", None)
++        if prepared is not None:
++            for cache in prepared:
++                cache._dspark_context_ready = True
++            return prepared
+         return self.make_cache()
+ 
++    def begin_target_prefill(self, target_model):
++        self.bind(target_model)
++        self.accept_lens, self.draft_lens = [], []
++        self.__dict__["_prefill_global_tail"] = None
++        return self.make_cache()
++
++    def prefill_target_hidden(self, hidden, cache):
++        old_tail = self.__dict__.get("_prefill_global_tail")
++        tail_source = hidden
++        if old_tail is not None and hidden[0].shape[1] < 1024:
++            tail_source = [
++                mx.concatenate([left, right], axis=1)
++                for left, right in zip(old_tail, hidden)
++            ]
++        self.__dict__["_prefill_global_tail"] = [
++            value[:, -1024:] for value in tail_source
++        ]
++        self._project_target_hidden(hidden, cache)
++
++    def finish_target_hidden(self, hidden, cache):
++        tail = self.__dict__.pop("_prefill_global_tail", None)
++        if tail is None:
++            self._project_target_hidden(hidden, cache)
++            return
++
++        final_features = mx.concatenate(hidden, axis=-1)
++        for index in (0, 2):
++            layer, entry = self.layers[index], cache[index]
++            context = self.mix(final_features, index, layer.dflare_norm)
++            layer.self_attn.prefill_context(context, entry)
++            mx.eval(entry.state)
++
++        # Rewind only the global logical offset, then replace its last 1024 rows
++        # and append the final prompt token through one GEMM-sized projection.
++        global_index = 1
++        layer, entry = self.layers[global_index], cache[global_index]
++        entry.trim(tail[0].shape[1])
++        combined = [
++            mx.concatenate([left, right], axis=1)
++            for left, right in zip(tail, hidden)
++        ]
++        context = self.mix(
++            mx.concatenate(combined, axis=-1),
++            global_index,
++            layer.dflare_norm,
++        )
++        layer.self_attn.prefill_context(context, entry)
++        mx.eval(entry.state)
++
++    def _project_target_hidden(self, hidden, cache):
++        features = mx.concatenate(hidden, axis=-1)
++        for index, (layer, entry) in enumerate(zip(self.layers, cache)):
++            context = self.mix(features, index, layer.dflare_norm)
++            layer.self_attn.prefill_context(context, entry)
++            mx.eval(entry.state)
++
++    def finish_target_prefill(self, cache):
++        # Normalize sliding entries to fixed full rings so the first proposal
++        # round and the compiled verifier both receive shape-stable caches.
++        self.__dict__["_prepared_prompt_length"] = max(
++            int(entry.offset) for entry in cache
++        )
++        arrays = []
++        for entry in cache:
++            if isinstance(entry, RotatingKVCache):
++                keys = entry._temporal_order(entry.keys)[..., -entry.max_size :, :]
++                values = entry._temporal_order(entry.values)[..., -entry.max_size :, :]
++                entry.keys, entry.values = mx.contiguous(keys), mx.contiguous(values)
++                entry._idx = entry.keys.shape[2]
++                arrays.extend((entry.keys, entry.values))
++        if arrays:
++            mx.eval(*arrays)
++        # nn.Module.__setattr__ treats lists of caches as module state. Keep
++        # this one-shot hand-off as ordinary Python state so reset() can pop it.
++        self.__dict__["_prepared_target_cache"] = cache
++
++    def choose_block_ceiling(self, captured_length, requested):
++        del captured_length
++        if os.environ.get("MLX_VLM_INKLING2_ADAPTIVE_DRAFT_BLOCK", "0") != "1":
++            return requested
++        prompt_length = int(self.__dict__.get("_prepared_prompt_length", 0))
++        return min(int(requested), 5) if prompt_length < 8192 else int(requested)
++
+     def mix(self, hidden, row, norm):
+         features = hidden.reshape(
+             *hidden.shape[:2], -1, self.config.hidden_size
+diff -ruN a/mlx_vlm/speculative/utils.py b/mlx_vlm/speculative/utils.py
+--- a/mlx_vlm/speculative/utils.py
++++ b/mlx_vlm/speculative/utils.py
+@@ -163,17 +163,42 @@
+ class SpeculativePrefill:
+     """Retain the target features needed by a drafter across prompt chunks."""
+ 
+-    def __init__(self, draft_kind, drafter):
++    def __init__(self, draft_kind, drafter, target_model=None):
+         self.kwargs = (
+             speculative_prefill_kwargs(draft_kind, drafter)
+             if drafter is not None and draft_kind in ("dflash", "eagle3")
+             else {}
+         )
+         self.chunks = []
++        self.drafter = drafter
++        self.target_model = target_model
++        self.incremental_cache = None
++
++    def _append_incremental(self, hidden):
++        begin = getattr(self.drafter, "begin_target_prefill", None)
++        append = getattr(self.drafter, "prefill_target_hidden", None)
++        enabled = getattr(
++            self.drafter, "supports_incremental_target_prefill", False
++        )
++        if (
++            not enabled
++            or self.target_model is None
++            or not callable(begin)
++            or not callable(append)
++            or not hidden
++            or hidden[0].shape[0] != 1
++        ):
++            return False
++        if self.incremental_cache is None:
++            self.incremental_cache = begin(self.target_model)
++        append(hidden, self.incremental_cache)
++        return True
+ 
+     def append(self, output):
+         if self.kwargs:
+             hidden = output.hidden_states
++            if self._append_incremental(hidden):
++                return
+             mx.async_eval(hidden)
+             self.chunks.append(hidden)
+ 
+@@ -187,6 +212,23 @@
+             ]
+ 
+     def finish(self, output):
++        if self.incremental_cache is not None:
++            finish_hidden = getattr(self.drafter, "finish_target_hidden", None)
++            if callable(finish_hidden):
++                finish_hidden(output.hidden_states, self.incremental_cache)
++            else:
++                self._append_incremental(output.hidden_states)
++            finish = getattr(self.drafter, "finish_target_prefill", None)
++            if callable(finish):
++                finish(self.incremental_cache)
++            self.incremental_cache = None
++            return output
++        if self._append_incremental(output.hidden_states):
++            finish = getattr(self.drafter, "finish_target_prefill", None)
++            if callable(finish):
++                finish(self.incremental_cache)
++            self.incremental_cache = None
++            return output
+         if self.chunks:
+             self.chunks.append(output.hidden_states)
+             output.hidden_states = [

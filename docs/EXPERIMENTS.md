@@ -6,6 +6,10 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **12:08 — bit-identical speculative decoding verified and pushed (`0007`).** Draft block 4 at 32k / 131k / 262k:
+  65.99 / 52.67 / 35.72 tok/s writing (no draft 53.73 / 40.16 / 29.76), tokens AND logprob sha equal to the unpatched
+  fork's no-draft run at all three. Earlier the DSpark port without the exact verifier was slower than no draft on
+  stack6 at 131k–262k (26.2 / 23.9 vs 39.9 / 29.6 tok/s, block 8), because its verify ran on the prefill path.
 - **11:50 — prefix-cache eviction fix ported (`0006`, from betizzel 295f5b21).** Our base had the bug: on fork + 0004,
   the upstream tests for it fail (3 of 726 in `test_cache.py`: a continuation checkpoint is refused because the store
   also reserves room for the next prefill); with the port all 726 pass. Two of six hunks were re-applied by hand

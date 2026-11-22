@@ -4,8 +4,8 @@
 #
 #   bash scripts/install.sh            ROOT=~/inkling-mini by default
 #   PREFIX=1 bash scripts/install.sh   also apply 0004-prefix-cache.patch (+ 0006 eviction fix) to the patched copy
-#   DSPARK=1 bash scripts/install.sh   also apply 0005-dspark-compiled-verify.patch (faster speculative decoding;
-#                                      not combinable with PREFIX=1 yet)
+#   EXACT_DSPARK=1 bash scripts/install.sh   also apply 0007-exact-dspark.patch (bit-identical speculative decoding)
+#   DSPARK=1 bash scripts/install.sh   older 0005 (same tokens, not bitwise) on stacked-v4.patch; not combinable with PREFIX=1
 #
 # Layout afterwards:
 #   $ROOT/venv              Python venv, mlx 0.32.4, the unpatched fork installed (for its deps)
@@ -28,6 +28,9 @@ if [ "${DSPARK:-0}" = 1 ]; then STACK=stacked-v4.patch; else STACK=stacked.patch
 (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/$STACK")
 if [ "${PREFIX:-0}" = 1 ] && [ "${DSPARK:-0}" = 1 ]; then
     echo "PREFIX=1 and DSPARK=1 cannot be combined yet" >&2; exit 1
+fi
+if [ "${EXACT_DSPARK:-0}" = 1 ] && [ "${DSPARK:-0}" != 1 ]; then
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0007-exact-dspark.patch")
 fi
 if [ "${DSPARK:-0}" = 1 ]; then
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0005-dspark-compiled-verify.patch")
