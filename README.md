@@ -13,6 +13,27 @@ the draft head.
   ([on which stack](#quality))
 - The hidden fact found in **15/15** of our head-to-head answers
 
+## Quickstart
+
+macOS on Apple Silicon. Measured on an M4 Max Mac Studio with 64 GB only. The weights are about 18 GiB.
+
+```bash
+git clone https://github.com/tomascupr/inkling-mini-mac-longctx && cd inkling-mini-mac-longctx
+bash scripts/install.sh      # fork + patches + venv (mlx 0.32.4) in ~/inkling-mini
+hf download thinkingmachines/Inkling-2-Mini --local-dir ~/inkling-mini/models/Inkling-2-Mini
+bash scripts/serve.sh 8080   # OpenAI-compatible server with the benchmarked settings
+```
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "'"$HOME"'/inkling-mini/models/Inkling-2-Mini",
+  "messages": [{"role": "user", "content": "Explain speculative decoding in two sentences."}],
+  "max_tokens": 256, "temperature": 0}'
+```
+
+`serve.sh` serves one request at a time with the draft head on for 1,024 to 262,144 context tokens
+(`NO_DRAFT=1 bash scripts/serve.sh` turns it off). Every setting it uses: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#settings-and-environment-variables).
+
 ## Against MLX-Serve: same Mac, same session
 
 [MLX-Serve](https://github.com/ddalcu/mlx-serve) is a strong, fast Inkling 2 Mini server for Apple Silicon, so it is
@@ -24,13 +45,13 @@ weights, the same prompts and their draft heads on. Every run is the server's ow
      tables and the X renders (docs/img/x-*.png) are regenerated with the same counting, rounding and verdict rules. Then bring the title, subline and bullets above in line with the new row: faster only where its
      verdict says faster. -->
 <!-- gen:h2h-table -->
-| Prompt | Reading (prefill), tok/s<br>MLX-Serve → this repo | | Writing (decode), tok/s<br>MLX-Serve → this repo | |
-|---|---:|:--|---:|:--|
-| 4k (4,078 tokens) | 1,036.2 → 1,039.8 | level (+0.36%) | 76.3 → 80.4 | **+5.4% faster** |
-| 32k (32,750 tokens) | 898.4 → 927.8 | **+3.2% faster** | 72.6 → 75.7 | **+4.3% faster** |
-| 131k (131,054 tokens) | 674.0 → 706.2 | **+4.7% faster** | 51.7 → 56.6 | **+9.6% faster** |
+| Prompt | Reading, tok/s<br>MLX-Serve → ours | Writing, tok/s<br>MLX-Serve → ours |
+|---|---:|---:|
+| 4k (4,078 tokens) | 1,036.2 → 1,039.8, level | 76.3 → 80.4, **+5.4%** |
+| 32k (32,750 tokens) | 898.4 → 927.8, **+3.2%** | 72.6 → 75.7, **+4.3%** |
+| 131k (131,054 tokens) | 674.0 → 706.2, **+4.7%** | 51.7 → 56.6, **+9.6%** |
 
-<sub>Same-session runs h29 (22:33), h30 (22:42) and h31 (23:10) CET, 2026-11-22. Warm runs, server-reported rates: on both sides the first request at each prompt length is not counted (MLX-Serve's at 4k is its own 16-token warm-up). Rounding never favours this repo. Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>
+<sub>Same-session warm runs on an M4 Max Mac Studio. Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>
 <!-- /gen:h2h-table -->
 
 ![Reading speed vs MLX-Serve by prompt length](docs/img/reading-vs-mlxserve.svg)
@@ -72,27 +93,6 @@ What we tried that didn't work, with numbers: [docs/BENCHMARKS.md](docs/BENCHMAR
 - The two kernel changes added after that gate were bitwise-equal in their own tests. The full gate has not yet been
   re-run on the exact final stack, nor with `serve.sh`'s settings (an 8192-token prefill chunk where the gate used 2048):
   [what is verified on what](docs/BENCHMARKS.md#quality-what-is-verified-on-what).
-
-## Quickstart
-
-macOS on Apple Silicon. Measured on an M4 Max Mac Studio with 64 GB only. The weights are about 18 GiB.
-
-```bash
-git clone https://github.com/tomascupr/inkling-mini-mac-longctx && cd inkling-mini-mac-longctx
-bash scripts/install.sh      # fork + patches + venv (mlx 0.32.4) in ~/inkling-mini
-hf download thinkingmachines/Inkling-2-Mini --local-dir ~/inkling-mini/models/Inkling-2-Mini
-bash scripts/serve.sh 8080   # OpenAI-compatible server with the benchmarked settings
-```
-
-```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{
-  "model": "'"$HOME"'/inkling-mini/models/Inkling-2-Mini",
-  "messages": [{"role": "user", "content": "Explain speculative decoding in two sentences."}],
-  "max_tokens": 256, "temperature": 0}'
-```
-
-`serve.sh` serves one request at a time with the draft head on for 1,024 to 262,144 context tokens
-(`NO_DRAFT=1 bash scripts/serve.sh` turns it off). Every setting it uses: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#settings-and-environment-variables).
 
 ## Docs
 
