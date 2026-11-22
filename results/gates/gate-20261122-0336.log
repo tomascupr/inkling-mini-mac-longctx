@@ -1,0 +1,9 @@
+ctx 4096 k 1 ptps 949.8 dtps 50.32 peak 20.05 gen 123 tok_eq_stack4_nonspec True needle True
+ctx 4096 k 5 ptps 874.4 dtps 63.44 peak 20.33 gen 123 tok_eq_stack4_nonspec True needle True
+ctx 4096 k 8 ptps 971.9 dtps 61.50 peak 20.33 gen 123 tok_eq_stack4_nonspec True needle True
+ctx 4096 k 5 ptps 972.0 dtps 65.33 peak 20.33 gen 123 tok_eq_stack4_nonspec True needle True
+ctx 32768 k 5 ptps 865.9 dtps 42.74 peak 21.32 gen 126 tok_eq_stack4_nonspec True needle True
+ctx 32768 k 8 ptps 866.3 dtps 48.43 peak 21.32 gen 126 tok_eq_stack4_nonspec True needle True
+ctx 4096 file stack5/ov/mlx_vlm/__init__.py ptps 951.3 dtps 50.49 peak 19.46 needle True tokens_equal True sha_equal True (unpatched 941.5/35.27/25.10)
+ctx 32768 file stack5/ov/mlx_vlm/__init__.py ptps 864.9 dtps 47.29 peak 20.34 needle True tokens_equal True sha_equal True (unpatched 845.5/33.46/26.19)
+ctx 131072 file stack5/ov/mlx_vlm/__init__.py ptps 623.0 dtps 35.86 peak 23.34 needle True tokens_equal True sha_equal True (unpatched 605.1/27.13/29.62)

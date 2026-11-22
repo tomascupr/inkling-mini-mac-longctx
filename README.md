@@ -27,6 +27,22 @@ Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 Ask about a 131k-token document once: reading it takes about 3.6 minutes. Ask a follow-up, and the answer starts
 in **1.5 s** (1.46–1.54 s measured), because the Mac keeps the document's processed state instead of reading it again.
 
+## Optional: speculative decoding, faster than the standard build's
+
+Inkling-2-Mini ships a small draft head (DSpark) that guesses several words ahead; the big model then checks
+the guesses in one pass, so the answer is the same, just written faster. The standard build already supports it.
+With our optional `0005` patch (install with `DSPARK=1`), the checking step is compiled too:
+
+| Writing, 4k-token prompt | tok/s |
+|---|---:|
+| Standard build, no draft | 33.1 |
+| Standard build + draft head (best block size, 5) | 58.8 |
+| This repo, no draft | 50.6 |
+| **This repo + draft head + `0005`** (block 5) | **63.4** first request, **65.3** after |
+
+Same output tokens as without the draft. At 32k the gain is small so far (48.4 vs 47.2 tok/s, block 8);
+131k not measured yet. Details: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
 ## What we changed
 
 - **No more rebuilding the same work for every word.** Each step of writing an answer is compiled once (turned into a
@@ -61,7 +77,7 @@ attention: this is the full bf16 model, just faster.
 ## What's next
 
 - **1M tokens on one Mac:** the model supports 1M tokens; our memory budget projects a 1M context to fit at full bf16 quality (~50.6 of the 51.8 GiB GPU limit). A full 1M run is next; not measured yet.
-- **Speculative decoding** with Inkling's own draft head, to push decode further. (The table above is without it on both sides; the standard build with its draft head already writes ~58.8 tok/s at 4k, see [docs/BENCHMARKS.md](docs/BENCHMARKS.md).)
+- **Speculative decoding at long context:** the draft head helps a lot at 4k (above) but barely at 32k so far; making it pay at 32k–131k is next.
 - More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~58–65% of its memory bandwidth on decode.
 
 ## Credits

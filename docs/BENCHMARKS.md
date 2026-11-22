@@ -23,10 +23,26 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
 *without* a draft model. The standard build can already use Inkling's DSpark draft head: on the same Mac, 4k prompt,
 it writes at **58.8 tok/s** with draft block 5 (40.8 with block 3, 56.3 with block 7;
-`results/runs/stock-v0.2.0-dspark-4k-20261122.json`). Our build with the same draft head and no further changes
-reaches 59.4 tok/s at 4k (block 5) and 41.4 at 32k (block 7), with the same output tokens as without the draft
-(`results/gates/dspark-stacked-4k-32k.json`). So at 4k, DSpark on the standard build is about as fast as DSpark on ours;
-a speculative path built on our compiled decode step is work in progress.
+`results/runs/stock-v0.2.0-dspark-4k-20261122.json`).
+
+With the optional `patches/0005-dspark-compiled-verify.patch` on top of `stacked.patch` and
+`MLX_VLM_INKLING2_INCREMENTAL_DRAFT_PREFILL=1 MLX_VLM_INKLING2_COMPILED_VERIFY=1` (plus the recommended env),
+one fresh process, runs in this order (`results/gates/dspark-compiled-verify-4k-32k.json`, `results/gates/gate-20261122-0336.log`):
+
+| Run | Draft block | Writing tok/s | Same tokens as no-draft run |
+|---|---:|---:|---|
+| 4k, no draft | – | 50.32 | (reference) |
+| 4k, first draft request (includes one-time draft-head setup) | 5 | **63.44** | yes |
+| 4k | 8 | 61.50 | yes |
+| 4k | 5 | **65.33** | yes |
+| 32k | 5 | 42.74 | yes |
+| 32k | 8 | **48.43** | yes |
+
+What 0005 does: the draft head's view of the prompt is captured incrementally per prefill chunk instead of as four
+full-prompt histories joined at the end, and the big model's check of a draft block runs as one compiled graph with
+offset-only rollback of the global KV cache. With 0005 applied and no draft model, outputs stay bit-identical
+(4k/32k/131k gate in `results/gates/gate-20261122-0336.log`). Speculative runs are checked on output tokens only.
+0005 does not combine with 0004 yet (one hunk conflicts).
 
 | Prefix cache, 131k document + follow-up question | Time to first token |
 |---|---:|
@@ -65,6 +81,7 @@ optimization log, step 2048; it was not part of the exactness gate.
 | `patches/0002-compiled-decode.patch` | Decode: one `mx.compile`d decode step (fewer graph nodes and kernels per token), wired into `generate_step`; v3 (2026-11-22 03:20) adds about a dozen fused kernels that copy MLX's own arithmetic order (attention-residual mixing, router, MoE output combine with its short convolution, l2-clips, norms, conv-state updates, merged attention projections), a decode attention kernel whose cost follows the live context length rather than the reserved KV size, and a fix so the saved conv state no longer keeps a whole prefill chunk alive (prefill working memory 0.43 GiB per 512-token step; projected 1M peak ~50.0 GiB). All bit-identical. Applies on top of 0001. | Claude track |
 | `patches/0003-prefill-attn-moe.patch` | Prefill: relative-attention kernel tiles (BQ=64, fast mask, global visits only) and a sort-free inverse permutation in the MoE (SwitchGLU) path, value-identical. Applies on top of 0001 + 0002. (Codex's compiled loop message gate, +0.6% prefill, is left out: it disabled the compiled decode path.) | Codex track |
 | `patches/0004-prefix-cache.patch` | Prefix cache: keep the fused attention kernel after a cached prefix is restored (no full mask over the whole cache), keep the conversation's reasoning effort in compaction so it hits the checkpoint, tests. Applies to the fork, and on top of `stacked.patch` (with fuzz). | prefix-cache track |
+| `patches/0005-dspark-compiled-verify.patch` | Optional, on top of `stacked.patch`: faster speculative decoding with the DSpark draft head (incremental draft-prompt capture, compiled block verify, offset-only rollback). Opt-in via the two env vars above; without a draft model, outputs are bit-identical to `stacked.patch`. Not yet combinable with 0004. | DSpark track (Codex) |
 
 All patches are `patch -p1` from the fork's source root (paths `a/mlx_vlm/...`).
 Applying 0001 → 0002 → 0003 in order gives a tree identical to `stacked.patch` (checked).
