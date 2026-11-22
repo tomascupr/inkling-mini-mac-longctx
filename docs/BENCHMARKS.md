@@ -24,6 +24,25 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 1M, step 2048, text-only, without 0008/0009 env | 163.3 | 11.36 | 50.76 | | | needle found |
 | 1M, step 512, text-only, previous build | 156.0 | 10.04 | 50.04 | | | needle found |
 
+## Short context vs MLX-Serve (Studio 2, second M4 Max 64 GB, 2026-11-22)
+
+Same official weights. Measured on Studio 2 only (it runs ~5% slower than Studio 1 on the same code, so compare
+within one machine). MLX-Serve figures are its own server-log numbers on Studio 2 (prefill chunk 2048, block-8 DSpark
+draft). Ours: `MLX_VLM_INKLING2_PREFILL_FUSED=1` (patch 0010), `scripts/exact_check.py`, 256 max new tokens, warm run.
+
+| | MLX-Serve | Ours, step 2048 (bit-identical to fork) | Ours, step 4096 (top-1 ≥99%) |
+|---|---:|---:|---:|
+| Reading 4k | 1010–1012 | 987.0 | **1013.1** |
+| Reading 32k | 877 | 872.4 | **888.2** |
+| Writing 4k, no draft | 56.4 | 52.6 | 52.9 |
+| Writing 32k, no draft | 50.2 | 48.6 | 48.9 |
+| Writing 4k, draft | 66 | in progress | |
+| Writing 32k, draft | 74.8 | in progress | |
+
+Step 2048 rows: tokens and logprob sha equal to the unpatched fork, needle found (`results/gates/studio2/p10b-*.json`).
+Step 4096 changes only the prefill chunking (fork vs itself at step 4096: teacher-forced top-1 99.6% on the fixed
+8-prompt set, needle answers identical); the fused kernels are bit-identical on top of it.
+
 **Bit-identical speculative decoding (`0007`, 2026-11-22 11:53–12:08 CET).** `stacked.patch` + `0007-exact-dspark.patch`,
 env `MLX_VLM_INKLING2_INCREMENTAL_DRAFT_PREFILL=1 MLX_VLM_INKLING2_EXACT_VERIFY=1 MLX_VLM_INKLING2_COMPILED_VERIFY=1
 MLX_VLM_INKLING2_DRAFT_CTX_WINDOW=65536` plus the recommended env, draft block 4, `scripts/exact_check_draft.py`

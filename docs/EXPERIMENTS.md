@@ -6,6 +6,22 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **16:20–16:45 — bit-identical attention-residual and message-gate kernels (patch 0010 update; now on by default
+  with `MLX_VLM_INKLING2_PREFILL_FUSED=1`).** Studio 2, applied to a fresh copy of the stack8 tree, eval-every 0:
+  step 2048: 4k 987.0, 32k 872.4 tok/s reading, **tokens AND logprob sha equal to the fork** at both, needle found
+  (was 904 / 804 with the first 0010). Step 4096: 4k **1013.1** / 32k **888.2** (MLX-Serve there: 1010–1012 / 877);
+  step 4096 changes the fork's own chunking (fork vs fork at step 4096: top-1 99.6%, greedy needle answers identical),
+  the fused paths add no difference on top. Writing unchanged (52.9 / 48.9 no draft). How the residual kernel matches
+  MLX bit for bit: rms_norm with rms_single_row's tree (D/4 threads × 4 columns, simd_sum, threadgroup simd_sum,
+  precise rsqrt); one-query scores with gemv's lane order (32 lanes × 4 columns per 128-column block, shuffle-down);
+  2–4-query scores as a sequential FMA chain over D (that is what the steel GEMM computes per element, checked);
+  softmax over the states axis is MLX's composite op (not the softmax kernel): precise exp(x − max), sequential sum,
+  divide; weighted sum as gemv_t (states 0–3, then 4–7, added) or an FMA chain over states. Two misses on the way:
+  the fused softmax kernel's fast::exp + reciprocal (wrong op), and metal::exp vs precise::exp (only visible with the
+  real queries, |q| up to 8; random test queries at 0.05 hid it). Message gate: rms_norm + concat + cast in one kernel
+  with the same tree, the fork's three matmuls (the merged forget/gain matmul was the inexact part), compiled tail.
+  Microbench: residual sites 2–3× faster (Q=1: 0.35 vs 0.84 ms at 2 states, 2048 rows; Q=3/4: 0.8–1.7 vs 1.8–3.0 ms).
+  Checked in the model per site (PF_CHECK) before the end-to-end sha gate.
 - **16:25 — patch 0010 gated on Studio 2 (applied to the stack8 tree, `MLX_VLM_INKLING2_PREFILL_FUSED=1`, step 2048,
   eval-every 0): tokens AND logprob sha equal to the fork at 4k and 32k, needle found.** Reading 4k 879.6 / 901.0 (cold /
   warm), 32k 803.6 / 803.5 (Studio 2 baseline same settings: 870.2 warm at 4k, 773.0 at 32k); writing unchanged
