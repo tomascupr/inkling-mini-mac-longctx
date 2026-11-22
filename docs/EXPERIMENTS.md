@@ -303,3 +303,21 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   Launcher: `scripts/serve.sh`. Needle found in all 18 answers.
 - 4k single-forward knobs (S1, step 8192, no limit): 8 MB command buffers 1088.1, 200 ops per buffer 1088.5, merged
   forget/gain matmul (`PF_MGX=0`) 1090.5 vs 1085.7. Within noise. FAIL.
+
+### 2026-11-22 21:50– CET: 4k reading push
+- **21:51 same-session confirm, Studio 2** (MLX-Serve `mlxserve-rerun-2150-draft-on.log`, then ours `srv-h27`, the
+  `scripts/serve.sh` settings): MLX-Serve reading 1030.9 / 1036.6 / 1026.4 at 4k and 896.6 / 896.4 / 897.0 at 32k, writing
+  75.9 / 76.1 / 77.0 and 70.7 / 70.6 / 71.7. Ours reading 1003.1 / 1008.8 and 901.3 / 899.3, writing 79.3 / 80.6 and
+  75.0 / 75.8. The 32k reading lead holds (+0.4%, thin); 4k is −2.4%. Needle 18/18.
+- Prefill profile at 4k, one 4,077-row chunk (S1, barriered): expert GEMMs 52.7% (14.7 ms per call), attention
+  projections 21.2%, relative-attention kernel 9.6% (7.4 ms per visit), message gates 3.9%, short convs 2.4%, l2 clips
+  2.3%, residual glue ~4%, MoE glue (route, sort, SwiGLU, un-sort) 3.4%.
+- Looped core (layers 6–18 × 3): the passes are sequential (each pass reads the one before through the message
+  gates) and a visit's expert GEMM already reads each expert's weights once for all 4k rows (compute bound, ~12.8
+  TFLOP/s), so keeping weights hot across passes has nothing to reuse. Not prototyped.
+- **Relative-attention kernel tiles at 4k (microbench, 4,077 rows, bitwise equal to the default in every config):**
+  sliding visits (1,024-key window) 6.9–7.0 ms with the defaults (KT=3, 32-query blocks); 64-query blocks 4.7–4.8
+  ms; KT=1 4.7 ms; 16-query blocks 13.5; prefetch 12.7; head grouping 5.5. Global visits: defaults best (9.7 ms).
+  -> `MLX_VLM_RELATIVE_ATTN_BQ_SWA=64` (env only, same arithmetic).
+- Expert gather without the sorted copy of x (`gather_qmm` with `lhs_indices`, microbench): bitwise equal, 66.6 vs
+  70.5 ms in a synthetic bench. Not wired yet.
