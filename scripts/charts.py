@@ -3,11 +3,11 @@
 Head-to-head vs MLX-Serve: every session listed under "h2h_sessions" in results/h2h-20261122/charts.json. A session
 log holds MLX-Serve's own log lines ('<- P+G tokens streamed [prefill: X tok/s, decode: Y tok/s]') and this repo's
 server log lines ('LOG prompt_tokens=P ... prefill=X tok/s decode=Y tok/s'), same Mac, same session, MLX-Serve first.
-Each prompt length found in the logs is one row of the tables and one group in the charts, so a new length (131k) is
-added by listing its session log in charts.json and running this script again.
+Each prompt length found in the logs is one row of the tables and one group in the charts, so a new length is added
+by listing its session log in charts.json and running this script again.
 
-Counting: MLX-Serve, every request except its 16-token warm-up; this repo, every request except the first one per
-prompt length after server start (its warm-up; reported separately).
+Counting: on both sides, every request except the first one at each prompt length in a session (reported
+separately). MLX-Serve's first 4k request is its own 16-token warm-up.
 Rounding never favours this repo: its means are rounded down, MLX-Serve's up, differences (from unrounded means) down.
 Verdict: "faster" only if, in every session, our slowest counted run beats MLX-Serve's fastest one; "behind" if
 MLX-Serve's slowest beats our fastest in every session; otherwise "level".
@@ -92,8 +92,7 @@ def session_names(sessions):
 def read_mlxserve(text):
     rows = {}
     for m in MS_RE.finditer(text):
-        if int(m[2]) > 16:
-            rows.setdefault(int(m[1]), []).append((Decimal(m[3]), Decimal(m[4])))
+        rows.setdefault(int(m[1]), []).append((Decimal(m[3]), Decimal(m[4]), int(m[2])))
     return rows
 
 
@@ -105,15 +104,18 @@ def read_ours(text):
 
 
 def load_pair(mlxserve_log, ours_log):
-    """{prompt_tokens: {"mlxserve": [(pre, dec)], "first": (pre, dec), "ours": [(pre, dec)]}}"""
+    """{prompt_tokens: {"mlxserve_first": (pre, dec, generated), "mlxserve": [(pre, dec)], "first": (pre, dec),
+    "ours": [(pre, dec)]}}"""
     them = read_mlxserve(open(os.path.join(H2H, mlxserve_log)).read())
     us = read_ours(open(os.path.join(H2H, ours_log)).read())
     out = {}
     for p in sorted(set(them) & set(us)):
-        if len(us[p]) < 2:
-            print(f"warning: {ours_log}: only {len(us[p])} request(s) at {p} tokens, nothing left after the warm-up")
+        if len(us[p]) < 2 or len(them[p]) < 2:
+            print(f"warning: {ours_log}: {len(them[p])} MLX-Serve and {len(us[p])} own request(s) at {p} tokens, "
+                  "nothing left on one side after its first request")
             continue
-        out[p] = {"mlxserve": them[p], "first": us[p][0], "ours": us[p][1:]}
+        out[p] = {"mlxserve_first": them[p][0], "mlxserve": [x[:2] for x in them[p][1:]],
+                  "first": us[p][0], "ours": us[p][1:]}
     return out
 
 
@@ -146,17 +148,25 @@ def analyse(sessions):
                 t = [x[k] for x in d["mlxserve"]]
                 o = [x[k] for x in d["ours"]]
                 with_first = [d["first"][k]] + o
+                ms_first, warmup = d["mlxserve_first"][k], d["mlxserve_first"][2] <= 16
+                both = None if warmup else ([ms_first] + t, with_first)
                 per.append(dict(session=s["name"], started=s["started"], mlxserve=t, ours=o, first=d["first"][k],
+                                mlxserve_first=ms_first, mlxserve_first_is_warmup=warmup,
                                 delta=pct(o, t), verdict=session_verdict(o, t),
-                                delta_with_first=pct(with_first, t), verdict_with_first=session_verdict(with_first, t)))
+                                delta_with_first=pct(with_first, t), verdict_with_first=session_verdict(with_first, t),
+                                delta_both=both and pct(both[1], both[0]),
+                                verdict_both=both and session_verdict(both[1], both[0])))
             t_all = [x for r in per for x in r["mlxserve"]]
             o_all = [x for r in per for x in r["ours"]]
             f_all = [r["first"] for r in per] + o_all
+            full = all(not r["mlxserve_first_is_warmup"] for r in per)
             rows.append(dict(prompt=p, label=label(p), metric=metric, sessions=per,
                              mlxserve=t_all, ours=o_all, mlxserve_mean=mean(t_all), ours_mean=mean(o_all),
                              delta=pct(o_all, t_all), verdict=overall([r["verdict"] for r in per]),
                              delta_with_first=pct(f_all, t_all),
-                             verdict_with_first=overall([r["verdict_with_first"] for r in per])))
+                             verdict_with_first=overall([r["verdict_with_first"] for r in per]),
+                             delta_both=pct(f_all, [r["mlxserve_first"] for r in per] + t_all) if full else None,
+                             verdict_both=overall([r["verdict_both"] for r in per]) if full else None))
     return rows
 
 
@@ -184,8 +194,9 @@ def readme_table(rows, sessions):
         lines.append(f"| {label(p)} ({p:,} tokens) "
                      f"| {fmt(up(rd['mlxserve_mean']))} → {fmt(down(rd['ours_mean']))} | {verdict_cell(rd)} "
                      f"| {fmt(up(wr['mlxserve_mean']))} → {fmt(down(wr['ours_mean']))} | {verdict_cell(wr)} |")
-    lines += ["", f"<sub>Same-session runs {session_names(sessions)}. Warm runs, server-reported rates: MLX-Serve's 16-token warm-up and "
-                  f"our first request per prompt length are not counted. Rounding never favours this repo. "
+    lines += ["", f"<sub>Same-session runs {session_names(sessions)}. Warm runs, server-reported rates: on both sides the first "
+                  f"request at each prompt length is not counted (MLX-Serve's at 4k is its own 16-token warm-up). "
+                  f"Rounding never favours this repo. "
                   f"Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>"]
     return "\n".join(lines)
 
@@ -209,29 +220,32 @@ def bench_sessions(rows, sessions):
     out = []
     for s in sessions:
         out += [f"**{s['name']}**, started {s['started']} (`results/h2h-20261122/{s['log']}`)", "",
-                "| Prompt | | MLX-Serve runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |",
-                "|---|---|---|---:|---:|---|---:|---:|---|"]
+                "| Prompt | | MLX-Serve first request (not counted) | MLX-Serve counted runs | Mean "
+                "| Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |",
+                "|---|---|---:|---|---:|---:|---|---:|---:|---|"]
         for r in rows:
             for x in r["sessions"]:
                 if x["session"] != s["name"]:
                     continue
-                out.append(f"| {r['label']} | {r['metric']} | {runs(x['mlxserve'])} | {fmt(up(mean(x['mlxserve'])))} "
-                           f"| {fmt(x['first'])} | {runs(x['ours'])} | {fmt(down(mean(x['ours'])))} "
-                           f"| {fmt_pct(x['delta'], 2)} | {x['verdict']} |")
+                ms_first = fmt(x["mlxserve_first"]) + (" (16-token warm-up)" if x["mlxserve_first_is_warmup"] else "")
+                out.append(f"| {r['label']} | {r['metric']} | {ms_first} | {runs(x['mlxserve'])} "
+                           f"| {fmt(up(mean(x['mlxserve'])))} | {fmt(x['first'])} | {runs(x['ours'])} "
+                           f"| {fmt(down(mean(x['ours'])))} | {fmt_pct(x['delta'], 2)} | {x['verdict']} |")
         out.append("")
     return "\n".join(out).rstrip()
 
 
 def bench_first(rows):
-    lines = ["| Prompt | | Our first requests | Δ per session, counted as warm-ups | Δ per session, first request counted | "
-             "Pooled Δ, first request counted | Verdict, first request counted |",
-             "|---|---|---|---|---|---:|---|"]
+    lines = ["| Prompt | | First requests: MLX-Serve → ours | Warm runs only (headline) | "
+             "Our first request counted, MLX-Serve's not | Both first requests counted |",
+             "|---|---|---|---|---|---|"]
     for r in rows:
-        firsts = ", ".join(f"{fmt(x['first'])} ({x['session']})" for x in r["sessions"])
-        a = ", ".join(f"{fmt_pct(x['delta'], 2)} ({x['session']})" for x in r["sessions"])
-        b = ", ".join(f"{fmt_pct(x['delta_with_first'], 2)} ({x['session']})" for x in r["sessions"])
-        lines.append(f"| {r['label']} | {r['metric']} | {firsts} | {a} | {b} | {fmt_pct(r['delta_with_first'], 2)} "
-                     f"| {r['verdict_with_first']} |")
+        firsts = ", ".join(("16-token warm-up" if x["mlxserve_first_is_warmup"] else fmt(x["mlxserve_first"]))
+                           + f" → {fmt(x['first'])} ({x['session']})" for x in r["sessions"])
+        both = "– (MLX-Serve's is its 16-token warm-up)" if r["delta_both"] is None else \
+            f"{fmt_pct(r['delta_both'], 2)}, {r['verdict_both']}"
+        lines.append(f"| {r['label']} | {r['metric']} | {firsts} | {fmt_pct(r['delta'], 2)}, {r['verdict']} "
+                     f"| {fmt_pct(r['delta_with_first'], 2)}, {r['verdict_with_first']} | {both} |")
     return "\n".join(lines)
 
 
@@ -294,9 +308,10 @@ def h2h_chart(path, metric, title, rows, sessions):
              linespacing=1.45)
     firsts = "; ".join(f"{r['label']} " + ", ".join(fmt(x["first"]) for x in r["sessions"]) for r in rows)
     fig.text(0.02, 0.03, "Bars: mean of counted runs (MLX-Serve rounded up, ours down). Faster only where every counted "
-                         "run of ours beats\nevery MLX-Serve run in each session. Not counted: MLX-Serve's 16-token "
-                         f"warm-up and our first request per prompt length\n(ours, tok/s: {firsts}). "
-                         "Raw runs and method: docs/BENCHMARKS.md", fontsize=7.8, color=MUTED, linespacing=1.4)
+                         "run of ours beats\nevery MLX-Serve run in each session. Not counted on either side: the first "
+                         "request at each prompt length (MLX-Serve's\nat 4k is its 16-token warm-up; ours, tok/s: "
+                         f"{firsts}). Raw runs and method: docs/BENCHMARKS.md", fontsize=7.8, color=MUTED,
+             linespacing=1.4)
     save(fig, path)
 
 
@@ -345,8 +360,8 @@ def x_chart(path, panels, title, subtitle, sessions):
     fig.legend(handles, ["MLX-Serve", "Ours"], loc="upper right", bbox_to_anchor=(0.975, 0.8), ncol=2,
                frameon=False, fontsize=22, labelcolor=X_INK, handlelength=1.2, columnspacing=1.5)
     fig.text(0.035, 0.03, f"Sessions {session_names(sessions)}.\n"
-                          "Server-reported rates, mean of warm runs: MLX-Serve's 16-token warm-up and our first request "
-                          "per prompt length not counted.\nOur means rounded down, MLX-Serve's up. Faster = our slowest "
+                          "Server-reported rates, mean of warm runs: on both sides the first request at each prompt "
+                          "length is not counted.\nOur means rounded down, MLX-Serve's up. Faster = our slowest "
                           "run beat MLX-Serve's fastest in every session. Method: docs/BENCHMARKS.md",
              fontsize=14, color=X_MUTED, linespacing=1.5)
     fig.savefig(path, format="png", facecolor=X_BG, metadata={"Software": None})
@@ -428,8 +443,9 @@ def main():
     json.dump(as_json(summary), open(os.path.join(H2H, "summary.json"), "w"), indent=1)
     for r in rows:
         print(f"{r['label']:>5} {r['metric']:<8} MLX-Serve {fmt(up(r['mlxserve_mean']))}  ours {fmt(down(r['ours_mean']))}  "
-              f"{fmt_pct(r['delta'], 2)}  {r['verdict']}  (first request counted: {fmt_pct(r['delta_with_first'], 2)}, "
-              f"{r['verdict_with_first']})")
+              f"{fmt_pct(r['delta'], 2)}  {r['verdict']}  (our first counted: {fmt_pct(r['delta_with_first'], 2)}, "
+              f"{r['verdict_with_first']}; both counted: "
+              + ("-" if r["delta_both"] is None else f"{fmt_pct(r['delta_both'], 2)}, {r['verdict_both']}") + ")")
 
 
 if __name__ == "__main__":
