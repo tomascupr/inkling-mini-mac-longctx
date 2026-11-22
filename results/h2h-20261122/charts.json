@@ -2,11 +2,10 @@
  "machine": "M4 Max Mac Studio, 64 GB",
  "h2h_sessions": [
   {"name": "h29", "log": "h2h29.log", "started": "2026-11-22 22:33 CET"},
-  {"name": "h30", "log": "h2h30.log", "started": "2026-11-22 22:42 CET"}
+  {"name": "h30", "log": "h2h30.log", "started": "2026-11-22 22:42 CET"},
+  {"name": "h31", "log": "h2h31-131k.log", "started": "2026-11-22 23:10 CET"}
  ],
  "h2h_history": [
-  {"name": "first", "started": "2026-11-22 19:09 CET", "mlxserve_log": "mlxserve-draft-on.log", "ours_log": "srv-f2k.log",
-   "ours": "patches through 0016, env.sh, prefill step 2048 (not same-session: MLX-Serve's single run is from 15:08, chunk 2048)"},
   {"name": "g17b", "started": "2026-11-22 19:52 CET", "mlxserve_log": "mlxserve-rerun-1952-draft-on.log", "ours_log": "srv-g17b.log",
    "ours": "+ 0017 (server passes the prompt ids to the draft head)"},
   {"name": "h26", "started": "2026-11-22 20:55 CET", "mlxserve_log": "mlxserve-rerun-2055-draft-on.log", "ours_log": "srv-h26.log",

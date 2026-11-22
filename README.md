@@ -1,25 +1,25 @@
 # Exact weights. Faster writing.
 
 **Optimised quality at highest speed.** Inkling 2 Mini with the official weights exactly as shipped, on an M4 Max Mac
-Studio. It writes faster than MLX-Serve at 4k and 32k and reads faster at 32k; at 4k, reading is level.
+Studio. It writes faster than MLX-Serve at 4k, 32k and 131k and reads faster at 32k and 131k; at 4k, reading is level.
 
 No requantizing, no FP8 KV cache, no sparse or approximate attention, and the outputs match the reference
 implementation. The speed comes from engineering alone: custom Metal kernels, a reworked server pipeline and fixes to
 the draft head.
 
-- **+5.4% faster writing** than MLX-Serve at 4k and **+4.3%** at 32k
-- **+3.2% faster reading** at 32k, **level** at 4k
+- **+5.4% faster writing** than MLX-Serve at 4k, **+4.3%** at 32k and **+9.6%** at 131k
+- **+3.2% faster reading** at 32k and **+4.7%** at 131k, **level** at 4k
 - **8/8** greedy answers identical to the reference and **520/520** teacher-forced top-1 tokens on our quality gate
   ([on which stack](#quality))
-- The hidden fact found in **12/12** of our head-to-head answers
+- The hidden fact found in **15/15** of our head-to-head answers
 
 ## Against MLX-Serve: same Mac, same session
 
 [MLX-Serve](https://github.com/ddalcu/mlx-serve) is a strong, fast Inkling 2 Mini server for Apple Silicon, so it is
-the baseline. Both servers ran on the same M4 Max Mac Studio in the same session, MLX-Serve first, with the same
-official weights, the same prompts and their draft heads on. Every run is the server's own log line.
+the baseline. In each session both servers ran on the same M4 Max Mac Studio, MLX-Serve first, with the same official
+weights, the same prompts and their draft heads on. Every run is the server's own log line.
 
-<!-- To add a prompt length (131k, later 262k): list its session log under "h2h_sessions" in
+<!-- To add a prompt length (for example 262k): list its session log under "h2h_sessions" in
      results/h2h-20261122/charts.json and run `python scripts/charts.py`. The table, both charts, the BENCHMARKS
      tables and the X renders (docs/img/x-*.png) are regenerated with the same counting, rounding and verdict rules. Then bring the title, subline and bullets above in line with the new row: faster only where its
      verdict says faster. -->
@@ -27,9 +27,10 @@ official weights, the same prompts and their draft heads on. Every run is the se
 | Prompt | Reading (prefill), tok/s<br>MLX-Serve → this repo | | Writing (decode), tok/s<br>MLX-Serve → this repo | |
 |---|---:|:--|---:|:--|
 | 4k (4,078 tokens) | 1,036.2 → 1,039.8 | level (+0.36%) | 76.3 → 80.4 | **+5.4% faster** |
-| 32k (32,750 tokens) | 898.5 → 927.8 | **+3.2% faster** | 72.6 → 75.7 | **+4.3% faster** |
+| 32k (32,750 tokens) | 898.4 → 927.8 | **+3.2% faster** | 72.6 → 75.7 | **+4.3% faster** |
+| 131k (131,054 tokens) | 674.0 → 706.2 | **+4.7% faster** | 51.7 → 56.6 | **+9.6% faster** |
 
-<sub>Same-session runs h29 (22:33) and h30 (22:42) CET, 2026-11-22. Warm runs, server-reported rates: MLX-Serve's 16-token warm-up and our first request per prompt length are not counted. Rounding never favours this repo. Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>
+<sub>Same-session runs h29 (22:33), h30 (22:42) and h31 (23:10) CET, 2026-11-22. Warm runs, server-reported rates: on both sides the first request at each prompt length is not counted (MLX-Serve's at 4k is its own 16-token warm-up). Rounding never favours this repo. Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>
 <!-- /gen:h2h-table -->
 
 ![Reading speed vs MLX-Serve by prompt length](docs/img/reading-vs-mlxserve.svg)

@@ -20,62 +20,68 @@ Contents: [the claim](#the-claim) · [head-to-head vs MLX-Serve](#head-to-head-v
 | README says | Backed by |
 |---|---|
 | +5.4% faster writing at 4k, +4.3% at 32k | Sessions h29 and h30 below; our slowest counted run beats MLX-Serve's fastest in both sessions |
-| +3.2% faster reading at 32k | Same, both sessions |
+| +9.6% faster writing at 131k | Session h31 (one session, 2 counted runs each side); our slowest counted run beats MLX-Serve's fastest |
+| +3.2% faster reading at 32k, +4.7% at 131k | Same tests: h29 and h30 at 32k, h31 at 131k |
 | Reading at 4k is level | Pooled +0.36%; in h30 the ranges overlap, so this is a tie, not a lead |
 | 8/8 greedy answers identical to the reference, 520/520 teacher-forced top-1 | Gate g26 on the stack through 0018 (not the exact final stack, see [quality](#quality-what-is-verified-on-what)) |
-| Hidden fact found in 12/12 of our head-to-head answers | `needle_found: True` on 6/6 requests in each of `srv-h29.out` and `srv-h30.out` |
+| Hidden fact found in 15/15 of our head-to-head answers | `needle_found: True` on every request in `srv-h29.out` (6), `srv-h30.out` (6) and `srv-h31.out` (3) |
 
 Not claimed: anything on other Macs; concurrent or batched requests (both servers ran one request at a time); prompts
-under 1,024 tokens (our draft head is off there); 131k and longer against MLX-Serve (running, see
-[131k](#131k-pending)); the first request at a new prompt length (slower for us, [disclosed below](#our-first-request-at-each-prompt-length)).
+under 1,024 tokens (our draft head is off there); 262k and longer against MLX-Serve; the first request at a new prompt
+length (slower on writing: ours at 4k and 32k, both servers' at 131k; [disclosed below](#first-request-at-each-prompt-length)).
 
 ## Head-to-head vs MLX-Serve
 
 ### Setup
 
 - **Machine and order.** Studio 2. Both servers in the same session on the same Mac, one at a time: MLX-Serve first,
-  stopped, then ours. h29 started 22:33 CET and h30 22:42 CET on 22 Nov 2026. The order was the same in every session
-  (not alternated).
+  stopped, then ours. On 22 Nov 2026: h29 started 22:33 CET, h30 22:42 CET (4k and 32k), h31 23:10–23:29 CET (131k).
+  The order was the same in every session (not alternated).
 - **Same model and prompts.** Both load the same weights directory (`thinkingmachines--Inkling-2-Mini`, about 18.19 GB)
   with bf16 KV (MLX-Serve logs `kv-quant: off`). Prompts: MLX-Serve's own needle prompts
-  `mlxserve/prompts/user-{4096,32768}.txt` (4,078 and 32,750 prompt tokens), greedy (temperature 0), `max_tokens` 256,
-  streaming, one request at a time. Each server gets 4k three times, then 32k three times. MLX-Serve also gets a
-  16-token warm-up at 4k first.
+  `mlxserve/prompts/user-{4096,32768,131072}.txt` (4,078, 32,750 and 131,054 prompt tokens), greedy (temperature 0),
+  `max_tokens` 256, streaming, one request at a time. In h29 and h30 each server gets 4k three times, then 32k three
+  times; in h31, 131k three times. MLX-Serve also gets a 16-token warm-up at 4k first in every session.
 - **MLX-Serve.** `mlx-serve 26.11.4-pre-release.1` (ships MLX 0.32.5), its DSpark draft head (block 8), prefill chunk
-  4096 (its own memory-sized choice), context 65,536, `--max-concurrent=1`. Rate from its log line
+  4096 (its own memory-sized choice), context 65,536 (163,840 in h31), `--max-concurrent=1`. Rate from its log line
   `<- P+G tokens streamed [prefill: X tok/s, decode: Y tok/s]`. Full logs: `mlxserve-rerun-2233-draft-on.log` (h29),
-  `mlxserve-rerun-2242-draft-on.log` (h30); the request lines are copied into `h2h29.log` / `h2h30.log`.
+  `mlxserve-rerun-2242-draft-on.log` (h30), `mlxserve-rerun-2310-draft-on.log` (h31); the request lines are copied
+  into `h2h29.log`, `h2h30.log` and `h2h31-131k.log`.
 - **This repo.** `mlx_vlm.server` with every patch through 0019 (`scripts/install.sh`), mlx 0.32.4, the
   `scripts/serve.sh` settings: `scripts/env.sh` (draft head block 8, exact verify, confidence cut 0.65, 16,384-id
   candidate list), prefill step 8192, MLX buffer cache at the working-set size, async per-visit prefill eval,
   sliding-window attention in 64-query blocks; `--max-num-seqs 1`. Rate from the server's own log line
-  (`LOG prompt_tokens=P ... prefill=X tok/s decode=Y tok/s`), copied into `h2h29.log` / `h2h30.log`. Client records
-  with the needle check: `srv-h29.out`, `srv-h30.out`. The configuration is the one recorded in `docs/EXPERIMENTS.md`
-  (22:33 and 22:42 entries); no environment snapshot or full server log was committed for these two sessions.
-- **Token counts.** Each server counts its own: MLX-Serve logs 122 generated tokens at 4k and 125 at 32k, ours 123 and
-  126. Rates are each server's tokens over its own time.
+  (`LOG prompt_tokens=P ... prefill=X tok/s decode=Y tok/s`), copied into the session logs. Client records with the
+  needle check: `srv-h29.out`, `srv-h30.out`, `srv-h31.out`. The configuration is the one recorded in
+  `docs/EXPERIMENTS.md` (22:33, 22:42 and 23:10 entries); no environment snapshot or full server log was committed for
+  these sessions.
+- **Token counts.** Each server counts its own: MLX-Serve logs 122 generated tokens at 4k and 125 at 32k and 131k, ours
+  123, 126 and 133. Rates are each server's tokens over its own time.
 - All files are in `results/h2h-20261122/`.
 
 ### Counting and rounding
 
-- **MLX-Serve:** every request except its 16-token warm-up, so 3 per prompt length per session.
-- **This repo:** every request except the first one per prompt length after server start, so 2 per prompt length per
-  session. That first request is our warm-up; [its numbers are below](#our-first-request-at-each-prompt-length).
+- **Both sides:** every request except the first one at each prompt length in the session, so 2 per prompt length per
+  session on our side, and 3 at 4k and 2 at 32k and 131k on MLX-Serve's. MLX-Serve's first 4k request is its own
+  16-token warm-up; at 32k and 131k its first request is a full one and is dropped like ours.
+  [The first requests and what counting them changes are below](#first-request-at-each-prompt-length).
 - Means are plain means of the server-reported rates. Shown to 0.1 with **ours rounded down and MLX-Serve's rounded
   up**. Differences (Δ) are computed from the unrounded means and rounded down. So no rounding favours this repo.
 - **Verdict.** *Faster* only if, in every session, our slowest counted run beats MLX-Serve's fastest. *Behind* if
   MLX-Serve's slowest beats our fastest in every session. Anything else is *level*. Per session the same test reads
   ahead / level / behind.
 
-### Results, pooled over h29 and h30
+### Results, pooled over sessions (h29 and h30 at 4k and 32k, h31 at 131k)
 
 <!-- gen:h2h-pooled -->
 | Prompt | | MLX-Serve mean (n, range) | This repo mean (n, range) | Δ | Verdict |
 |---|---|---:|---:|---:|---|
 | 4k (4,078) | reading | 1,036.2 (6, 1,027.6–1,042.1) | 1,039.8 (4, 1,036.3–1,042.0) | +0.36% | level (+0.36%) |
 | 4k (4,078) | writing | 76.3 (6, 75.6–76.8) | 80.4 (4, 80.1–81.1) | +5.49% | +5.4% faster |
-| 32k (32,750) | reading | 898.5 (6, 897.8–899.0) | 927.8 (4, 927.3–928.5) | +3.27% | +3.2% faster |
-| 32k (32,750) | writing | 72.6 (6, 70.9–74.2) | 75.7 (4, 75.1–76.6) | +4.38% | +4.3% faster |
+| 32k (32,750) | reading | 898.4 (4, 897.8–899.0) | 927.8 (4, 927.3–928.5) | +3.28% | +3.2% faster |
+| 32k (32,750) | writing | 72.6 (4, 71.6–74.2) | 75.7 (4, 75.1–76.6) | +4.37% | +4.3% faster |
+| 131k (131,054) | reading | 674.0 (2, 673.9–674.0) | 706.2 (2, 706.2–706.2) | +4.78% | +4.7% faster |
+| 131k (131,054) | writing | 51.7 (2, 51.6–51.7) | 56.6 (2, 56.6–56.7) | +9.68% | +9.6% faster |
 <!-- /gen:h2h-pooled -->
 
 ### Every run, per session
@@ -83,79 +89,96 @@ under 1,024 tokens (our draft head is off there); 131k and longer against MLX-Se
 <!-- gen:h2h-sessions -->
 **h29**, started 2026-11-22 22:33 CET (`results/h2h-20261122/h2h29.log`)
 
-| Prompt | | MLX-Serve runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |
-|---|---|---|---:|---:|---|---:|---:|---|
-| 4k | reading | 1,039.3, 1,027.6, 1,036.6 | 1,034.5 | 893.2 | 1,041.5, 1,039.7 | 1,040.6 | +0.58% | ahead |
-| 4k | writing | 76.5, 76.6, 76.1 | 76.4 | 70.2 | 80.1, 80.5 | 80.3 | +5.10% | ahead |
-| 32k | reading | 898.3, 898.1, 897.8 | 898.1 | 928.8 | 927.4, 928.2 | 927.8 | +3.31% | ahead |
-| 32k | writing | 74.1, 72.3, 74.2 | 73.6 | 69.0 | 75.1, 75.7 | 75.4 | +2.53% | ahead |
+| Prompt | | MLX-Serve first request (not counted) | MLX-Serve counted runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |
+|---|---|---:|---|---:|---:|---|---:|---:|---|
+| 4k | reading | 1,023.5 (16-token warm-up) | 1,039.3, 1,027.6, 1,036.6 | 1,034.5 | 893.2 | 1,041.5, 1,039.7 | 1,040.6 | +0.58% | ahead |
+| 4k | writing | 101.4 (16-token warm-up) | 76.5, 76.6, 76.1 | 76.4 | 70.2 | 80.1, 80.5 | 80.3 | +5.10% | ahead |
+| 32k | reading | 898.3 | 898.1, 897.8 | 898.0 | 928.8 | 927.4, 928.2 | 927.8 | +3.32% | ahead |
+| 32k | writing | 74.1 | 72.3, 74.2 | 73.3 | 69.0 | 75.1, 75.7 | 75.4 | +2.93% | ahead |
 
 **h30**, started 2026-11-22 22:42 CET (`results/h2h-20261122/h2h30.log`)
 
-| Prompt | | MLX-Serve runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |
-|---|---|---|---:|---:|---|---:|---:|---|
-| 4k | reading | 1,037.0, 1,034.2, 1,042.1 | 1,037.8 | 855.4 | 1,042.0, 1,036.3 | 1,039.1 | +0.13% | level |
-| 4k | writing | 75.6, 76.1, 76.8 | 76.2 | 69.2 | 80.2, 81.1 | 80.6 | +5.88% | ahead |
-| 32k | reading | 898.9, 899.0, 898.4 | 898.8 | 926.7 | 927.3, 928.5 | 927.9 | +3.24% | ahead |
-| 32k | writing | 70.9, 72.0, 71.6 | 71.5 | 70.2 | 75.4, 76.6 | 76.0 | +6.29% | ahead |
+| Prompt | | MLX-Serve first request (not counted) | MLX-Serve counted runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |
+|---|---|---:|---|---:|---:|---|---:|---:|---|
+| 4k | reading | 1,025.6 (16-token warm-up) | 1,037.0, 1,034.2, 1,042.1 | 1,037.8 | 855.4 | 1,042.0, 1,036.3 | 1,039.1 | +0.13% | level |
+| 4k | writing | 102.0 (16-token warm-up) | 75.6, 76.1, 76.8 | 76.2 | 69.2 | 80.2, 81.1 | 80.6 | +5.88% | ahead |
+| 32k | reading | 898.9 | 899.0, 898.4 | 898.7 | 926.7 | 927.3, 928.5 | 927.9 | +3.24% | ahead |
+| 32k | writing | 70.9 | 72.0, 71.6 | 71.8 | 70.2 | 75.4, 76.6 | 76.0 | +5.84% | ahead |
+
+**h31**, started 2026-11-22 23:10 CET (`results/h2h-20261122/h2h31-131k.log`)
+
+| Prompt | | MLX-Serve first request (not counted) | MLX-Serve counted runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |
+|---|---|---:|---|---:|---:|---|---:|---:|---|
+| 131k | reading | 674.0 | 674.0, 673.9 | 674.0 | 703.5 | 706.2, 706.2 | 706.2 | +4.78% | ahead |
+| 131k | writing | 45.0 | 51.7, 51.6 | 51.7 | 52.3 | 56.6, 56.7 | 56.6 | +9.68% | ahead |
 <!-- /gen:h2h-sessions -->
 
 Notes on these numbers:
 
-- `docs/EXPERIMENTS.md` gives h29 as +0.6% (4k reading) and +3.4% (32k reading), and the pooled 4k reading as +0.4%.
-  The means give +0.58% (+0.5897%), +3.31% with our counted runs (+3.34% if our first 32k request is included) and
-  +0.36%. The figures here are the re-derived ones.
+- `docs/EXPERIMENTS.md` gives h29 as +0.6% (4k reading) and +3.4% (32k reading), the pooled 4k reading as +0.4%, and
+  h31 as +4.8% (131k reading) and +9.7% (131k writing). Those are medians or means of all runs, rounded to the nearest
+  0.1. The figures here are re-derived from warm runs and rounded down: +0.58%, +3.32%, +0.36%, +4.78% (+4.7%) and
+  +9.68% (+9.6%).
 - The h29 4k reading passes the per-session test (our 1,039.7 vs MLX-Serve's best 1,039.3) by 0.4 tok/s; h30 does not.
   4k reading is level.
+- 131k rests on one session (h31) with 2 counted runs per side. The gaps are wide against the run-to-run spread:
+  reading 706.2 vs at most 674.0, writing at least 56.6 vs at most 51.7.
 
-### Our first request at each prompt length
+### First request at each prompt length
 
-Our first request at each prompt length is slower, MLX-Serve's is not. At 4k it is the first request after server
-start: reading 893.2 and 855.4 tok/s, writing 70.2 and 69.2 tok/s, against 1,036–1,042 and 80–81 afterwards. At 32k
-reading is unaffected (928.8 and 926.7), but **writing is soft: 69.0 tok/s in h29 and 70.2 in h30**, against 75.1–76.6
-afterwards. The same happened in h28 (68.6). It looks like a one-time cost of a new prompt length (kernel compilation
-for new shapes, or KV and buffer growth), not steady-state decoding; it has not been investigated further.
-MLX-Serve's first 32k request shows no such dip (74.1 tok/s in h29, its fastest of three; 70.9 in h30, its slowest).
+The first request at a new prompt length is slower on writing, on both sides, and the headline counts neither side's.
 
-Counting these first requests changes the results as follows:
+- **4k.** Ours is also the first request after server start: reading 893.2 and 855.4 tok/s, writing 70.2 and 69.2,
+  against 1,036–1,042 and 80–81 afterwards. MLX-Serve's first 4k request is its own 16-token warm-up (its writing rate
+  over 16 tokens is not comparable).
+- **32k.** Reading is steady on both sides. **Our writing is soft: 69.0 tok/s in h29 and 70.2 in h30**, against
+  75.1–76.6 afterwards (68.6 in h28). MLX-Serve's first 32k writing is 74.1 in h29 (its fastest of three) and 70.9 in
+  h30 (its slowest).
+- **131k (h31).** Reading is steady (MLX-Serve 674.0, then 674.0 and 673.9; ours 703.5, then 706.2 twice). **Writing is
+  soft on both sides: MLX-Serve 45.0, then 51.7 and 51.6; ours 52.3, then 56.6 and 56.7.** Our server was started fresh
+  for h31, so our first 131k request is also its cold start.
+
+It looks like a one-time cost of a new prompt length (kernel compilation for new shapes, or KV and buffer growth), not
+steady-state decoding; it has not been investigated further. Counting the first requests changes the results as
+follows:
 
 <!-- gen:h2h-first -->
-| Prompt | | Our first requests | Δ per session, counted as warm-ups | Δ per session, first request counted | Pooled Δ, first request counted | Verdict, first request counted |
-|---|---|---|---|---|---:|---|
-| 4k | reading | 893.2 (h29), 855.4 (h30) | +0.58% (h29), +0.13% (h30) | −4.16% (h29), −5.77% (h30) | −4.97% | level |
-| 4k | writing | 70.2 (h29), 69.2 (h30) | +5.10% (h29), +5.88% (h30) | +0.69% (h29), +0.87% (h30) | +0.78% | level |
-| 32k | reading | 928.8 (h29), 926.7 (h30) | +3.31% (h29), +3.24% (h30) | +3.34% (h29), +3.19% (h30) | +3.27% | faster |
-| 32k | writing | 69.0 (h29), 70.2 (h30) | +2.53% (h29), +6.29% (h30) | −0.37% (h29), +3.58% (h30) | +1.58% | level |
+| Prompt | | First requests: MLX-Serve → ours | Warm runs only (headline) | Our first request counted, MLX-Serve's not | Both first requests counted |
+|---|---|---|---|---|---|
+| 4k | reading | 16-token warm-up → 893.2 (h29), 16-token warm-up → 855.4 (h30) | +0.36%, level | −4.97%, level | – (MLX-Serve's is its 16-token warm-up) |
+| 4k | writing | 16-token warm-up → 70.2 (h29), 16-token warm-up → 69.2 (h30) | +5.49%, faster | +0.78%, level | – (MLX-Serve's is its 16-token warm-up) |
+| 32k | reading | 898.3 → 928.8 (h29), 898.9 → 926.7 (h30) | +3.28%, faster | +3.28%, faster | +3.27%, faster |
+| 32k | writing | 74.1 → 69.0 (h29), 70.9 → 70.2 (h30) | +4.37%, faster | +1.57%, level | +1.58%, level |
+| 131k | reading | 674.0 → 703.5 (h31) | +4.78%, faster | +4.65%, faster | +4.64%, faster |
+| 131k | writing | 45.0 → 52.3 (h31) | +9.68%, faster | +6.87%, faster | +11.66%, faster |
 <!-- /gen:h2h-first -->
 
-At 32k, counting our first request turns writing into a tie (−0.37% in h29, +3.58% in h30, +1.58% pooled); reading
-stays ahead. At 4k the first request is the server's cold start, and MLX-Serve's own warm-up (its 16-token request) is
-not counted on its side, so counting ours would set our cold start against its warm runs. The README's writing claims
-are warm-run claims and say so.
+Counting our first request but not MLX-Serve's is the harshest reading for us. It makes 4k level on both metrics (our
+cold start against MLX-Serve's runs after its warm-up) and 32k writing level; 32k reading and both 131k rows stay
+faster. Counting both sides' first requests leaves 32k writing level and widens 131k writing, because MLX-Serve's first
+131k request is softer than ours; the headline keeps the warm-run +9.6%. The README's claims are warm-run claims and
+say so.
 
-### 131k (pending)
-
-A same-session 131k head-to-head is running. Its log will land as `results/h2h-20261122/h2h31-131k.log`. To add it,
-list it under `h2h_sessions` in `results/h2h-20261122/charts.json` and run `python scripts/charts.py`: the README table,
-both charts and the tables above gain a 131k row under the same counting, rounding and verdict rules. A 262k session
-can be added the same way. No 131k or 262k figure is claimed until its log is in this repo.
+To add a session (for example 262k), list its log under `h2h_sessions` in `results/h2h-20261122/charts.json` and run
+`python scripts/charts.py`: the README table, the charts, the X renders and the tables above gain the new rows under
+the same counting, rounding and verdict rules.
 
 ### How we got here (earlier runs on Studio 2)
 
-Δ of our counted mean vs MLX-Serve's mean in each pair, same counting as above. The first pair is not same-session:
-MLX-Serve's single run (prefill chunk 2048) is from 15:08 and ours from 19:09–19:16. Every later pair is same-session,
-MLX-Serve first, and MLX-Serve chose prefill chunk 4096 in all of them.
+Δ of our counted mean vs MLX-Serve's mean in each same-session pair, same counting as above; MLX-Serve chose prefill
+chunk 4096 in all of them. The earlier comparison of ours at 19:09 against MLX-Serve's 15:08 runs
+(`mlxserve-draft-on.log`, `srv-f2k.log`) is not listed: it is not same-session, and with one MLX-Serve run at 32k
+nothing is left after its first request.
 
 <!-- gen:h2h-history -->
 | Session (Studio 2) | Our stack | Reading 4k | Reading 32k | Writing 4k | Writing 32k | Logs |
 |---|---|---:|---:|---:|---:|---|
-| first, 19:09 CET | patches through 0016, env.sh, prefill step 2048 (not same-session: MLX-Serve's single run is from 15:08, chunk 2048) | −3.3% | −1.8% | +3.7% | −15.6% | `mlxserve-draft-on.log`, `srv-f2k.log` |
-| g17b, 19:52 CET | + 0017 (server passes the prompt ids to the draft head) | −5.3% | −3.7% | +4.6% | +4.7% | `mlxserve-rerun-1952-draft-on.log`, `srv-g17b.log` |
-| h26, 20:55 CET | + 0018 (last-chunk fold, lean draft prefill, early candidate list) | −4.9% | −3.4% | +5.6% | +6.5% | `mlxserve-rerun-2055-draft-on.log`, `srv-h26.log` |
-| h27, 21:50 CET | + serve.sh (step 8192, no 1 GiB cache limit, async per-visit eval) | −2.5% | +0.4% | +4.7% | +6.1% | `mlxserve-rerun-2150-draft-on.log`, `srv-h27.log` |
-| h28, 22:10 CET | + sliding-window attention in 64-query blocks (BQ_SWA=64) | −0.6% | +2.5% | +5.3% | +6.2% | `h2h28.log` |
-| h29, 22:33 CET | + 0019 (l2 clips as one kernel per call): final stack | +0.5% | +3.3% | +5.1% | +2.5% | `h2h29.log` |
-| h30, 22:42 CET | final stack, repeat | +0.1% | +3.2% | +5.8% | +6.2% | `h2h30.log` |
+| g17b, 19:52 CET | + 0017 (server passes the prompt ids to the draft head) | −5.3% | −3.6% | +4.6% | +4.1% | `mlxserve-rerun-1952-draft-on.log`, `srv-g17b.log` |
+| h26, 20:55 CET | + 0018 (last-chunk fold, lean draft prefill, early candidate list) | −4.9% | −3.4% | +5.6% | +6.8% | `mlxserve-rerun-2055-draft-on.log`, `srv-h26.log` |
+| h27, 21:50 CET | + serve.sh (step 8192, no 1 GiB cache limit, async per-visit eval) | −2.5% | +0.4% | +4.7% | +5.9% | `mlxserve-rerun-2150-draft-on.log`, `srv-h27.log` |
+| h28, 22:10 CET | + sliding-window attention in 64-query blocks (BQ_SWA=64) | −0.6% | +2.5% | +5.3% | +6.1% | `h2h28.log` |
+| h29, 22:33 CET | + 0019 (l2 clips as one kernel per call): final stack | +0.5% | +3.3% | +5.1% | +2.9% | `h2h29.log` |
+| h30, 22:42 CET | final stack, repeat | +0.1% | +3.2% | +5.8% | +5.8% | `h2h30.log` |
 <!-- /gen:h2h-history -->
 
 ## Quality: what is verified on what
@@ -173,10 +196,11 @@ questions, 2 chat prompts of 36 and 37 tokens):
 
 The reference is the unpatched community fork (`betizzel/mlx-vlm` at `55ca2e9e`) at prefill step 2048.
 
-**Needle.** The harness line in both `h2h29.log` and `h2h30.log` reads `18 VIOLET-ANCHOR-4729` (logged as "needle
-18/18" in `docs/EXPERIMENTS.md`). Our client records `srv-h29.out` and `srv-h30.out` show `needle_found: True` on all 6
-of our requests in each session. The logs do not say which answers the harness count of 18 covers, so the README claims
-only our 12/12.
+**Needle.** The harness line reads `18 VIOLET-ANCHOR-4729` in both `h2h29.log` and `h2h30.log` (logged as "needle
+18/18" in `docs/EXPERIMENTS.md`) and `9 VIOLET-ANCHOR-4729` in `h2h31-131k.log` ("all 6 answers" in
+`docs/EXPERIMENTS.md`). Our client records show `needle_found: True` on every one of our requests: 6 in `srv-h29.out`,
+6 in `srv-h30.out`, 3 in `srv-h31.out`. The logs do not say which answers the harness counts cover, so the README
+claims only our 15/15.
 
 **What changed after gate g26, and how each change was checked:**
 
@@ -433,9 +457,9 @@ Details: `docs/trackA-prefill-notes.md`, `docs/trackB-decode-notes.md`, `docs/PR
 
 ## Not measured yet
 
-- The 131k head-to-head vs MLX-Serve (running; [131k](#131k-pending)).
+- A 262k head-to-head vs MLX-Serve, and a second 131k session.
 - The full quality gate on the exact final stack and the `serve.sh` settings (prefill step 8192).
-- Why our first request at a new prompt length is slower.
+- Why the first request at a new prompt length writes more slowly (on both servers).
 - Concurrent requests: both servers were measured one request at a time.
 - Prompts under 1,024 tokens: the draft head is off there, and chat-length writing takes a slower decode path.
 - The draft head at 524k and 1M (it switches itself off above 262,144 tokens), and the prefix cache combined with the
