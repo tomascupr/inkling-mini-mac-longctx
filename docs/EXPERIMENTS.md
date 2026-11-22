@@ -272,3 +272,11 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   weights): on mlx 0.32.4 S1 1062.6 / 938.2 vs 1068.1 / 942.2 (the extra scale pass costs); on mlx 0.32.4 + PR #4709
   built from source (S2): 973.2 / 863.3 vs 976.5 / 865.7 with the old layout and 981.0 / 865.9 on stock 0.32.4. The
   half-loader fast path doesn't reach the sorted gather at our shapes. FAIL; answers still found the needle.
+- **21:00 same-session head-to-head, Studio 2, final stack (0018 defaults), server log, warm runs.** MLX-Serve
+  (`mlxserve-rerun-2055-draft-on.log`, 3 warm): reading 1031.0 / 1036.8 / 1029.7 at 4k, 892.7 / 894.4 / 893.6 at 32k;
+  writing 73.9 / 74.5 / 75.0 at 4k, 72.7 / 72.7 / 71.3 at 32k. Ours (`srv-h26.log`, 2 warm): reading 983.0 / 982.2 at 4k,
+  864.2 / 863.4 at 32k; writing 78.0 / 79.3 at 4k, 77.1 / 76.8 at 32k. Writing wins both rows (+5% / +7%); reading is
+  4.9% / 3.4% behind. Needle found in all 6 of our answers.
+- 21:00 gate on the final stack (Studio 1, `top1-g26.json`): greedy answers through the draft head 8/8 identical to the
+  reference; teacher-forced top-1 520/520 = 100% vs the fork's teacher-forced argmax (96.5% vs the fork's greedy text,
+  same as before).

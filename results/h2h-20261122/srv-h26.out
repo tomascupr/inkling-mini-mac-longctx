@@ -1,0 +1,14 @@
+h26 4096 0 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 520.8458476584528, 'decode_tps': 73.9378756507756, 'needle_found': True, 'error': None}
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=9.481s prefill=861.0 tok/s decode=69.7 tok/s finish_reason=stop in_flight=0
+h26 4096 1 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 964.8395481039042, 'decode_tps': 80.63064084516166, 'needle_found': True, 'error': None}
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=5.744s prefill=983.0 tok/s decode=78.0 tok/s finish_reason=stop in_flight=0
+h26 4096 2 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 964.6340944518366, 'decode_tps': 81.91260607900483, 'needle_found': True, 'error': None}
+LOG prompt_tokens=4078 generated_tokens=123 elapsed=5.721s prefill=982.2 tok/s decode=79.3 tok/s finish_reason=stop in_flight=0
+h26 32768 0 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 859.4725244271808, 'decode_tps': 73.26596614465375, 'needle_found': True, 'error': None}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=39.817s prefill=863.0 tok/s decode=69.9 tok/s finish_reason=stop in_flight=0
+h26 32768 1 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 861.2676303240138, 'decode_tps': 79.73254792314951, 'needle_found': True, 'error': None}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=39.597s prefill=864.2 tok/s decode=77.1 tok/s finish_reason=stop in_flight=0
+h26 32768 2 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 860.5457591372024, 'decode_tps': 79.41035917571463, 'needle_found': True, 'error': None}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=39.636s prefill=863.4 tok/s decode=76.8 tok/s finish_reason=stop in_flight=0
+../stack16/srv3.sh: line 24: 69772 Terminated: 15          $PY -u -c "$START" --host 127.0.0.1 --port $PORT --model-dir $M --prefill-step-size ${STEP:-2048} --max-num-seqs 1 --max-tokens 8192 --log-level INFO >> $LOG 2>&1
+SRVDONE
