@@ -6,6 +6,25 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **16:45–16:57 — drafted writing on Studio 2 (stack13 = stack7 with 0007 exact DSpark + new 0010; prefill step 4096,
+  `NOHASH=1` speed runs; tokens identical to the no-draft run in every case).** Warm tok/s, 4k: k4 59.8 / **k5 62.6** /
+  k6 57.7 / k8 53.4 (acceptance 75 / 77 / 63 / 54%); 32k: k4 64.6 / **k5 67.7** / k6 61.4 / k8 59.4 (77 / 76 / 64 /
+  58%). MLX-Serve on the same Mac: 66.1 (4k) / 74.8 (32k), block 8. Gaps: −5% at 4k, −9.5% at 32k. Rounds cost ~3
+  decode steps at k5 (60 ms at 32k); acceptance falls off after the 5th draft token. At 4k, 4–5 rounds per answer miss
+  the exact verifier (sliding-window cache not yet full) and decode token by token. Note: the stack8/stack12 trees have
+  no 0007, so the exact-verify env is ignored there (drafting at 4k: 45.9 / 54.1, slower than no draft) — use a tree
+  with 0007. No-draft writing, same runs: 4k 52.6, 32k 48.9 (MLX-Serve 56.4 / 50.2); the per-token logprob hash in
+  exact_check costs nothing measurable (52.62 with `NOHASH=1`).
+- **Reading, repeated runs on Studio 2 (patch 0010, step 4096):** 4k 1013.1 / 1015.1–1037.2 / 1023.3 tok/s warm
+  across five runs, 32k 883.5–888.2 (MLX-Serve 1010–1012 / 877). Gate status: step 2048 = bit-identical to the fork
+  (sha); step 4096 = the fork's own chunk change, top-1 99.6% vs step 2048 on the 8-prompt set, needle answers
+  identical (`results/gates/studio2/top1/top1-fork-step4096.json`).
+- **Quality-gate harness (`scripts/quality/top1.py`):** greedy 64-token answers on 8 fixed prompts (6 corpus slices
+  3k–60k chars with questions, 2 chat prompts) from the fork at step 2048 as reference, then teacher-forced top-1
+  agreement of a candidate on those continuations. Results in `results/gates/studio2/top1/`. The ablation logs
+  (`abl.log`, `top1-arx.*`, `top1-only-*`) were measured with the first, inexact kernels (PF_AR 98.65%, PF_MG 99.62%,
+  PF_PJ 98.46% alone; `top1-arx` = the exact kernel before the precise-exp fix, 98.46%); the fork vs itself at
+  step 1024 is 98.85%, at step 4096 99.62%. The final kernels are bit-identical, so they need no top-1 margin.
 - **16:20–16:45 — bit-identical attention-residual and message-gate kernels (patch 0010 update; now on by default
   with `MLX_VLM_INKLING2_PREFILL_FUSED=1`).** Studio 2, applied to a fresh copy of the stack8 tree, eval-every 0:
   step 2048: 4k 987.0, 32k 872.4 tok/s reading, **tokens AND logprob sha equal to the fork** at both, needle found

@@ -1,0 +1,7 @@
+== fork STEP=4096
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 502/520 = 96.54%
+SUMMARY teacher-forced top1 vs fork teacher-forced 518/520 = 99.62%
+== fork STEP=1024
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 498/520 = 95.77%
+SUMMARY teacher-forced top1 vs fork teacher-forced 514/520 = 98.85%
+NOISEDONE

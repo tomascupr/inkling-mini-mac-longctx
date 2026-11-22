@@ -1,0 +1,20 @@
+== ONLY each
+== only PF_AR
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 503/520 = 96.73%
+SUMMARY teacher-forced top1 vs fork teacher-forced 513/520 = 98.65%
+== only PF_MG
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 500/520 = 96.15%
+SUMMARY teacher-forced top1 vs fork teacher-forced 518/520 = 99.62%
+== only PF_MOE
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 503/520 = 96.73%
+SUMMARY teacher-forced top1 vs fork teacher-forced 509/520 = 97.88%
+== only PF_SC
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 502/520 = 96.54%
+SUMMARY teacher-forced top1 vs fork teacher-forced 520/520 = 100.00%
+== only PF_L2
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 502/520 = 96.54%
+SUMMARY teacher-forced top1 vs fork teacher-forced 520/520 = 100.00%
+== only PF_PJ
+SUMMARY greedy_identical 0/8  teacher-forced top1 vs fork greedy 500/520 = 96.15%
+SUMMARY teacher-forced top1 vs fork teacher-forced 512/520 = 98.46%
+ABLDONE

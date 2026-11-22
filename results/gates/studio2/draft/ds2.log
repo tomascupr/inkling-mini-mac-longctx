@@ -1,0 +1,8 @@
+16:46:50 ctx 4096 k 5 step 4096 
+dsF0-4096-k5 dtps 52.29 ptps 896.6 needle True acc 0.7666666666666667 rounds 30 misses 0 ntok 123
+dsF0-4096-k5 dtps 53.82 ptps 903.9 needle True acc 0.7666666666666667 rounds 30 misses 0 ntok 123
+DSDONE
+16:47:09 ctx 4096 k 5 step 4096 
+dsF1-4096-k5 dtps 52.47 ptps 1013.7 needle True acc 0.7666666666666667 rounds 30 misses 0 ntok 123
+dsF1-4096-k5 dtps 52.87 ptps 1037.2 needle True acc 0.7666666666666667 rounds 30 misses 0 ntok 123
+DSDONE

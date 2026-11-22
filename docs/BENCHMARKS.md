@@ -32,14 +32,16 @@ draft). Ours: `MLX_VLM_INKLING2_PREFILL_FUSED=1` (patch 0010), `scripts/exact_ch
 
 | | MLX-Serve | Ours, step 2048 (bit-identical to fork) | Ours, step 4096 (top-1 ≥99%) |
 |---|---:|---:|---:|
-| Reading 4k | 1010–1012 | 987.0 | **1013.1** |
-| Reading 32k | 877 | 872.4 | **888.2** |
+| Reading 4k | 1010–1012 | 987.0 | **1013–1037** (5 warm runs) |
+| Reading 32k | 877 | 872.4 | **884–888** |
 | Writing 4k, no draft | 56.4 | 52.6 | 52.9 |
 | Writing 32k, no draft | 50.2 | 48.6 | 48.9 |
-| Writing 4k, draft | 66 | in progress | |
-| Writing 32k, draft | 74.8 | in progress | |
+| Writing 4k, draft | 66.1 (block 8) | | 62.6 (block 5; k4 59.8, k8 53.4) |
+| Writing 32k, draft | 74.8 (block 8) | | 67.7 (block 5; k4 64.6, k8 59.4) |
 
 Step 2048 rows: tokens and logprob sha equal to the unpatched fork, needle found (`results/gates/studio2/p10b-*.json`).
+Draft rows: patch 0007 (exact DSpark verify) + 0010, tokens identical to the no-draft run, `results/gates/studio2/draft/`.
+Still behind MLX-Serve on writing (draft and no draft); work in progress.
 Step 4096 changes only the prefill chunking (fork vs itself at step 4096: teacher-forced top-1 99.6% on the fixed
 8-prompt set, needle answers identical); the fused kernels are bit-identical on top of it.
 

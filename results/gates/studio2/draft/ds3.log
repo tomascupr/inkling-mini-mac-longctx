@@ -1,0 +1,25 @@
+16:49:10 ctx 4096 k 4 step 4096 
+d13-4096-k4 dtps 58.07 ptps 991.5 needle True acc 0.7456140350877193 rounds 38 misses 5 ntok 123
+d13-4096-k4 dtps 59.77 ptps 1020.2 needle True acc 0.7456140350877193 rounds 38 misses 10 ntok 123
+16:49:29 ctx 4096 k 5 step 4096 
+d13-4096-k5 dtps 61.74 ptps 1000.9 needle True acc 0.7666666666666667 rounds 30 misses 5 ntok 123
+d13-4096-k5 dtps 62.56 ptps 1019.0 needle True acc 0.7666666666666667 rounds 30 misses 10 ntok 123
+16:49:47 ctx 4096 k 6 step 4096 
+d13-4096-k6 dtps 57.40 ptps 1003.1 needle True acc 0.6266666666666667 rounds 30 misses 4 ntok 123
+d13-4096-k6 dtps 57.67 ptps 1011.0 needle True acc 0.6266666666666667 rounds 30 misses 8 ntok 123
+16:50:05 ctx 4096 k 8 step 4096 
+d13-4096-k8 dtps 52.76 ptps 1001.0 needle True acc 0.5384615384615384 rounds 26 misses 4 ntok 123
+d13-4096-k8 dtps 53.42 ptps 1013.5 needle True acc 0.5384615384615384 rounds 26 misses 8 ntok 123
+16:50:24 ctx 32768 k 4 step 4096 
+d13-32768-k4 dtps 63.94 ptps 882.7 needle True acc 0.7719298245614035 rounds 38 misses 0 ntok 126
+d13-32768-k4 dtps 64.63 ptps 884.8 needle True acc 0.7719298245614035 rounds 38 misses 0 ntok 126
+16:51:48 ctx 32768 k 5 step 4096 
+d13-32768-k5 dtps 66.73 ptps 883.5 needle True acc 0.7580645161290323 rounds 31 misses 0 ntok 126
+d13-32768-k5 dtps 67.74 ptps 884.8 needle True acc 0.7580645161290323 rounds 31 misses 0 ntok 126
+16:53:12 ctx 32768 k 6 step 4096 
+d13-32768-k6 dtps 60.02 ptps 884.7 needle True acc 0.64 rounds 30 misses 0 ntok 126
+d13-32768-k6 dtps 61.40 ptps 885.0 needle True acc 0.64 rounds 30 misses 0 ntok 126
+16:54:37 ctx 32768 k 8 step 4096 
+d13-32768-k8 dtps 58.43 ptps 883.5 needle True acc 0.5771428571428572 rounds 25 misses 0 ntok 126
+d13-32768-k8 dtps 59.40 ptps 884.6 needle True acc 0.5771428571428572 rounds 25 misses 0 ntok 126
+DSDONE

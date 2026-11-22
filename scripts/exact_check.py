@@ -35,6 +35,7 @@ def build(ctx):
     doc = doc[:cut] + NEEDLE + doc[cut:]
     user = "Below is a long document. Read all of it, then answer the question at the end.\n\n" + doc + QUESTION
     return apply_chat_template(processor, model.config, user, reasoning_effort=os.environ.get("REASONING", "low"))
+NOHASH = os.environ.get("NOHASH") == "1"  # speed-only runs: skip the per-token logprob hash (costs ~1 ms/token)
 for p in PLAN:
     prompt = build(p["ctx"])
     gc.collect(); mx.clear_cache(); mx.reset_peak_memory()
@@ -44,7 +45,7 @@ for p in PLAN:
     for r in stream_generate(model, processor, prompt, max_tokens=p.get("max_tokens", 256), temperature=0.0,
                              prefill_step_size=p["step"]):
         toks.append(int(r.token)); text += r.text; last = r
-        if r.logprobs is not None:
+        if r.logprobs is not None and not NOHASH:
             lp = r.logprobs if isinstance(r.logprobs, mx.array) else mx.array(r.logprobs)
             h.update(memoryview(lp.astype(mx.float32)))
     el = time.perf_counter() - t0

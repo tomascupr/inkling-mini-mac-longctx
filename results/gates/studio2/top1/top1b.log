@@ -1,0 +1,11 @@
+0 1347 
+1 3324 
+2 8343 
+3 14692 greedy_eq_ref
+4 1480 
+5 4741 
+6 37 greedy_eq_ref
+7 36 greedy_eq_ref
+SUMMARY greedy_identical 3/8  teacher-forced top1 vs fork greedy 504/520 = 96.92%
+SUMMARY teacher-forced top1 vs fork teacher-forced 512/520 = 98.46%
+TOP1DONE
