@@ -20,13 +20,14 @@ Measured on one M4 Max 64 GB (our second test Mac; MLX-Serve's own server-log nu
 | Reading, 4k prompt | 1010–1012 | **1013–1037** | **fastest** |
 | Reading, 32k prompt | 877 | **884–888** | **fastest** |
 | Writing, 32k, no draft | 50.2 | 48.9 | on par (−3%) |
-| Writing, 4k, no draft | 56.4 | 52.6 | behind (−7%), in progress |
-| Writing, 4k, draft head | 66.1 | 62.6 | behind (−5%), in progress |
+| Writing, 4k, no draft | 56.4 | 55.1–55.9 | on par (−1 to −2%) |
+| Writing, 4k, draft head | 66.1 | **74.8–76.3** | **fastest** |
 | Writing, 32k, draft head | 74.8 | 67.7 | behind (−9%), in progress |
 
 Reading rows: prefill step 4096 (the reference fork's own chunking option, which passes our quality gate); at step
-2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head here is
-bit-identical to writing without it. Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
+2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head gives
+the same tokens as writing without it. The 4k writing rows use opt-in `MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024` (patch
+0011: same tokens as the reference fork on this run, not bit-identical log-probabilities; quality gate in progress). Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
 
 ### Before → after (standard build → this repo)
 

@@ -31,8 +31,10 @@ if [ "${DSPARK:-0}" != 1 ]; then
     # Long-context reading: env MLX_VLM_RELATIVE_ATTN_KTILES=3 and MLX_VLM_EXACT_HOST_VOCAB=1 (bit-identical).
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0008-kt3-attention-tiles.patch")
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0009-host-vocab-prefill.patch")
-    # Short-context reading: env MLX_VLM_INKLING2_PREFILL_FUSED=1 (bit-identical parts on; PF_AR/PF_MG opt-in, not bit-identical).
+    # Short-context reading: env MLX_VLM_INKLING2_PREFILL_FUSED=1 (bit-identical fused prefill kernels).
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0010-prefill-fused.patch")
+    # Short-prompt writing: env MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024 (opt-in; quality-gated, not bit-identical).
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0011-decode-min-keys.patch")
 fi
 if [ "${PREFIX:-0}" = 1 ] && [ "${DSPARK:-0}" = 1 ]; then
     echo "PREFIX=1 and DSPARK=1 cannot be combined yet" >&2; exit 1

@@ -1,0 +1,17 @@
+Opt-in: MLX_VLM_INKLING2_DECODE_MIN_KEYS (default 4096 = the fork's threshold, bit-identical).
+Below the threshold the fork decodes global attention with the stock path, which the compiled
+decode step and the exact draft verifier do not cover, so the first tokens after a <4096-token
+prompt decode eagerly. 1024 lets the split-K kernel and the compiled step serve them (exact
+attention, different reduction order; tokens identical to the fork on the 4k needle run).
+
+--- a/mlx_vlm/models/inkling2/language.py
++++ b/mlx_vlm/models/inkling2/language.py
+@@ -41,7 +41,7 @@
+ 
+ 
+ # Global-cache length from which single-query decode uses the split-K kernel.
+-_DECODE_KERNEL_MIN_KEYS = 4096
++_DECODE_KERNEL_MIN_KEYS = int(__import__("os").environ.get("MLX_VLM_INKLING2_DECODE_MIN_KEYS", "4096"))
+ # Caches whose single-query decode takes the fused path (the server's batch
+ # caches hold one row when it serves one sequence; the step caches are the
+ # compiled decode step's views, see fast_decode.py).

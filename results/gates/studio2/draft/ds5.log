@@ -1,0 +1,10 @@
+17:10:59 ctx 4096 k 5 step 4096 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+mk-4096-k5 dtps 74.84 ptps 997.3 needle True acc 0.7666666666666667 rounds 30 misses 0 ntok 123 
+mk-4096-k5 dtps 76.34 ptps 1019.0 needle True acc 0.7666666666666667 rounds 30 misses 0 ntok 123 
+17:11:15 ctx 4096 k 6 step 4096 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+mk-4096-k6 dtps 65.88 ptps 1002.4 needle True acc 0.6266666666666667 rounds 30 misses 0 ntok 123 
+mk-4096-k6 dtps 66.54 ptps 1015.2 needle True acc 0.6266666666666667 rounds 30 misses 0 ntok 123 
+17:11:32 ctx 4096 k 8 step 4096 MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024
+mk-4096-k8 dtps 61.29 ptps 999.5 needle True acc 0.5384615384615384 rounds 26 misses 0 ntok 123 
+mk-4096-k8 dtps 61.96 ptps 1017.8 needle True acc 0.5384615384615384 rounds 26 misses 0 ntok 123 
+DSDONE

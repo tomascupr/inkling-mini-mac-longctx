@@ -6,6 +6,17 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **17:00–17:15 — short-prompt writing: the first ~18 tokens after a 4k prompt were decoded eagerly (patch 0011).**
+  Decode profile on Studio 2 (stack13, 4k needle prompt): the compiled decode step costs 1.5 ms of CPU, `async_eval`
+  16.5 ms wall of which 6.7 ms CPU, so the step is GPU-bound at ~18 ms — but 17 of 123 steps returned "not served"
+  and ran the eager graph (~28 ms). Cause: the fork decodes global attention with the stock path below 4096 keys
+  (`_DECODE_KERNEL_MIN_KEYS`), and both the compiled step and the exact draft verifier only cover the split-K kernel
+  path; a 4078-token prompt sits under the line for its first 17 tokens (the same thing caused the 4–5 "misses" per
+  answer in the 4k draft runs). Opt-in `MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024`: no-draft writing 4k 52.6 → **55.1–55.9**,
+  drafted 4k k5 62.6 → **74.8 / 76.3** (k6 66.5, k8 62.0), misses 0; tokens identical to the unpatched fork's no-draft
+  output in every run (not bit-identical in log-probabilities: split-K attention adds in a different order). Prompts
+  ≥4096 tokens are unaffected. Round profile before the fix (32k, k8): draft 7.7 ms, verify graph build 1.9 ms,
+  `async_eval` 68 ms, final wait 9 ms per round; verify is GPU-bound (8 rows touch up to 8× the experts).
 - **16:45–16:57 — drafted writing on Studio 2 (stack13 = stack7 with 0007 exact DSpark + new 0010; prefill step 4096,
   `NOHASH=1` speed runs; tokens identical to the no-draft run in every case).** Warm tok/s, 4k: k4 59.8 / **k5 62.6** /
   k6 57.7 / k8 53.4 (acceptance 75 / 77 / 63 / 54%); 32k: k4 64.6 / **k5 67.7** / k6 61.4 / k8 59.4 (77 / 76 / 64 /
