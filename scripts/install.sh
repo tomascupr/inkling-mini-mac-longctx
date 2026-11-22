@@ -72,6 +72,8 @@ if [ "$DRAFT" = 1 ]; then
     # layer per chunk (sliding layers once from the tail); candidate list built during prefill; message-gate casts
     # inside the compiled tail (bitwise). Opt-in experiments: PF_MGF (fused gate tail, bitwise), PF_GU, PF_POSTSCALE.
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0018-server-fold-last-lean-draft-prefill.patch")
+    # Prefill l2 clips as one kernel per call (kernels.l2_clip_rows / l2_clip_small_rows, bitwise; PF_L2K=0 to disable).
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0019-prefill-l2-clip-kernel.patch")
 fi
 [ -x "$ROOT/venv/bin/python" ] || "$PYBIN" -m venv "$ROOT/venv"
 "$ROOT/venv/bin/pip" install --quiet --upgrade pip

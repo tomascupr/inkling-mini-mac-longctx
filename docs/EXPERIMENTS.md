@@ -333,3 +333,10 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   MLX-Serve 1040.5 / 1033.9 / 1033.6 vs ours 1040.1 / 1019.8; 32k 895.5 / 896.7 / 895.6 vs 919.5 / 918.2 / 919.2
   (+2.6%). Writing 4k 74.8–76.7 vs 79.4 / 80.1; 32k 71.7–72.4 vs 76.5 / 76.4. Needle 18/18. 4k reading is within
   about 0.6%, still slightly behind on average.
+- **Prefill l2 clips as one Metal kernel per call (patch 0019, `PF_L2K`, bitwise):** q/k/rel clips at 4077 rows
+  0.96 -> 0.31, 0.35 -> 0.16, 0.21 -> 0.15 ms on S1 (S2 1.37 -> 0.33, 0.47 -> 0.24, 0.35 -> 0.15), all `array_equal`.
+  Server A/B (stack28 vs stack26, interleaved): S1 4k 1129.2 / 1127.3 vs 1114.4 / 1113.8 (+1.2%), 32k 1002.7 / 1002.9
+  vs 994.1 / 993.8 (+0.9%); S2 4k 1044.3 / 1038.3 vs 1025.4 / 1030.8 (+1.2%), 32k 927.9 / 927.2 vs 918.9 / 919.6
+  (+0.9%). Output text identical in all runs. WIN.
+- Prefill value norm and casts through `rms_norm_cast` (`PF_VN`): 0.50 -> 0.56 ms per visit (bitwise), server 1128.1 /
+  1128.4 vs 1127.0. FAIL; not kept.

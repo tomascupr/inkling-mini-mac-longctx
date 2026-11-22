@@ -1,0 +1,80 @@
+diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
+--- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 22:33:00.190087297 +0100
++++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 22:33:00.194087291 +0100
+@@ -365,6 +365,52 @@
+     )[0]
+ 
+ 
++@lru_cache(maxsize=1)
++def _l2_clip_small_rows():
++    # l2_clip_rows for rows of at most 32 (one thread per row, sequential sum:
++    # MLX's order for such rows) so that many prefill rows fill the GPU.
++    return mx.fast.metal_kernel(
++        name="inkling2_l2_clip_small_rows",
++        input_names=["x", "scale", "threshold"],
++        output_names=["out"],
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=r"""
++        const int row = int(thread_position_in_grid.x);
++        if (row >= ROWS) return;
++        const int h = row % H;
++        float xs[E];
++        float total = 0;
++        {
++            #pragma clang fp contract(off)
++            for (int i = 0; i < E; ++i) {
++                float xi = float(x[row * E + i]);
++                if (HAS_SCALE) xi = xi * float(scale[h * E + i]);
++                xs[i] = xi;
++                const float sq = xi * xi;
++                total = sq + total;
++            }
++        }
++        const float factor = metal::min(threshold / (metal::precise::sqrt(total) + 1e-6f), 1.0f);
++        for (int i = 0; i < E; ++i) out[row * E + i] = static_cast<T>(xs[i] * factor);
++        """,
++    )
++
++
++def l2_clip_small_rows(x, threshold, scale=None):
++    h, e = x.shape[-2:]
++    rows = x.size // e
++    return _l2_clip_small_rows()(
++        inputs=[x, x if scale is None else scale, mx.array(threshold, mx.float32)],
++        template=[("T", x.dtype), ("ROWS", rows), ("H", h), ("E", e),
++                  ("HAS_SCALE", scale is not None)],
++        grid=(rows, 1, 1),
++        threadgroup=(256, 1, 1),
++        output_shapes=[x.shape],
++        output_dtypes=[x.dtype],
++    )[0]
++
++
+ _ROUTER_SCORES_SRC = r"""
+         constexpr int BN = 8, TM = 4, TN = 4, blockN = BN * 32 * TN;
+         threadgroup float tgp_memory[BN * (TM + TM)];
+diff -ruN a/mlx_vlm/models/inkling2/prefill_fused.py b/mlx_vlm/models/inkling2/prefill_fused.py
+--- a/mlx_vlm/models/inkling2/prefill_fused.py	2026-11-22 22:33:00.194087291 +0100
++++ b/mlx_vlm/models/inkling2/prefill_fused.py	2026-11-22 22:33:00.194087291 +0100
+@@ -728,6 +728,7 @@
+     return _orig_moe_call(self, x)
+ 
+ _SC = _on("PF_SC"); _L2 = _on("PF_L2")
++_L2K = _on("PF_L2K"); _L2KS = _on("PF_L2KS")
+ _orig_sc_call = L.ShortConvolution.__call__
+ def sc_call(self, x, cache=None, mask=None):
+     if (_SC and mask is None and not self.training and x.ndim == 3 and x.shape[1] > 8
+@@ -750,6 +751,12 @@
+ _orig_l2 = L._l2_clip
+ def l2(x, threshold, scale=None):
+     if _L2 and x.ndim == 4 and x.shape[0] * x.shape[1] > 8:
++        e = x.shape[-1]
++        if (_L2K and x.dtype == mx.bfloat16 and (e == 128 or (_L2KS and e <= 32))
++                and (scale is None or (scale.dtype == mx.bfloat16 and scale.shape == x.shape[-2:]))):
++            # One kernel per call, bitwise equal to l2_clip (kernels.l2_clip_rows).
++            from .kernels import l2_clip_rows, l2_clip_small_rows
++            return (l2_clip_rows if e == 128 else l2_clip_small_rows)(x, threshold, scale)
+         t = mx.array(threshold, mx.float32)
+         return _l2_noscale(x, t) if scale is None else _l2_scale(x, t, scale)
+     return _orig_l2(x, threshold, scale)
