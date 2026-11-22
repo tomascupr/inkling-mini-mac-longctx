@@ -280,3 +280,19 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
 - 21:00 gate on the final stack (Studio 1, `top1-g26.json`): greedy answers through the draft head 8/8 identical to the
   reference; teacher-forced top-1 520/520 = 100% vs the fork's teacher-forced argmax (96.5% vs the fork's greedy text,
   same as before).
+
+### 2026-11-22 21:03– CET: reading push (fast prototyping, single warm run unless noted)
+- CPU vs GPU in prefill (S1, CLI path, eval per visit): time outside `mx.eval` is 6% of wall at 4k (warm) and 1.1% at
+  32k, so prefill is GPU-bound. Per-op profile (barriered, 4k): MoE 55.6% (23.6 ms per 2,048-row visit), attention
+  projections 20.8%, attention core 9.8%, message gates 3.8%, l2 clips 2.5%, short convs 2.5%, residual glue ~4%.
+- Async per-visit eval (`MLX_VLM_EXACT_PREFILL_EVAL_ASYNC=1`): S2 983.7 / 869.0 and 987.3 / 871.5 vs 981.7 / 863.9
+  (+0.3% / +0.7%); every 2 visits: 980.5 / 863.1 (S2), 1070 / 943 (S1); every 4: 1062 / 938 (S1). Small WIN for every 1.
+- Step 4096 with the 1 GiB server cache limit (S1, async): 1043.9 / 924.7. Still worse, as before.
+- **The server's 1 GiB MLX buffer-cache limit was throttling prefill.** No limit (`CACHE_LIMIT=0`, i.e. the working-set
+  size): step 2048 S2 994.0 / 871.1 (S1 1079.7 / 952.1); step 4096 S2 1004.9 / 892.3 (S1 1090.8 / 968.2). At 4096
+  the 32k answer's draft acceptance changed (27 rounds / 95 accepted vs 25 / 102: chunking changes the hidden states'
+  last bits, so the drafter sees slightly different inputs; same answer text), and 32k writing fell to 78.8 (S1) /
+  71.4 (S2).
+- 32k step sweep without the limit (S1, async): 3072 960.3 / 83.0 writing, 6144 967.9 / 81.6, 8192 972.6 / 83.3.
+- 4k single chunk variants (S2, step 4096, no limit): eval every 2 1000.2, no per-visit eval 1003.7, `PF_MGF=1` + 4 MB
+  buffers 1003.3. Plateau ~1,000-1,005 vs MLX-Serve 1,030-1,037.
