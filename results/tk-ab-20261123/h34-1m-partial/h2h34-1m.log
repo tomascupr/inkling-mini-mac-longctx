@@ -1,0 +1,34 @@
+==========================================
+h2h34 start 2026-11-23 00:07:40 CET
+host=Tomass-Mac-Studio-6.local ctx=1040000 ctx-size=1048576 timeout=21600 http-timeout=21600
+note=524k on this Mac was stopped at 00:06:11 CET because it duplicated Studio 2
+draft_max_ctx is left at 262144 from env.sh; report whether draft is active at 1M
+work=/Users/tomascupr/.exo-inkling-bench/exact-work/s1/short
+==========================================
+---- mlxserve ctx=1040000 start 00:07:40 CET ----
+00:07:40 CET starting server h32-0007-1040000-draft-on ctx-size=1048576 timeout=21600 --no-pld
+00:07:44 CET server ready (h32-0007-1040000-draft-on)
+{"object":"list","data":[{"id":"thinkingmachines--Inkling-2-Mini","object":"model","created":1795388864,"owned_by":"mlx-serve","loaded":true,"state":"ready","bytes_resident":19526019168,"bytes_on_disk":null,"context_length":1048576,"max_model_len":1048576,"batched_decode":true,"capabilities":["chat","tool_use","streaming","json_schema"],"input_modalities":["text"],"agent_budget":{"context":1048576,"output":65536,"compaction_reserve":20000,"too_small_for":{}},"engines":["mlx"],"meta":{"architecture":"inkling2_loop","engine":"mlx","vocab_size":200058,"hidden_size":2304,"num_layers":48,"quantization":null,"context_length":1048576,"model_max_tokens":1048576,"embedding_max_length":null,"is_moe":true,"drafter_loaded":false,"drafter_path":null,"mtp_loaded":false,"mtp_available":false,"spec_exact":false,"kv_quant":"off","gen_temperature":1,"gen_top_p":null,"gen_top_k":null}}],"machine":{"os":"macos","model":"Mac16,9","free_mib":35607,"total_mib":65536}}MODEL_ID=thinkingmachines--Inkling-2-Mini
+{"tag": "warmup-1040000", "elapsed_s": 4.405287584057078, "ttft_s": 0.010784875135868788, "prompt_tokens": 4078, "completion_tokens": 16, "prompt_tps": 378122.13387962343, "decode_tps": 3.6409125354545027, "finish_reason": "length", "chunks": 17, "usage": {"prompt_tokens": 4078, "completion_tokens": 16, "total_tokens": 4094, "prompt_tokens_details": {"cached_tokens": 0}}, "needle_found": false, "text_tail": "The user asks: According to the archivist's note in the", "error": null, "http_timeout_s": 21600}
+00:07:49 CET bench h32-0007-1040000-draft-on-r1 ctx=1040000
+{"tag": "h32-0007-1040000-draft-on-r1-1040000", "elapsed_s": 0.255294332979247, "ttft_s": null, "prompt_tokens": null, "completion_tokens": null, "prompt_tps": null, "decode_tps": null, "finish_reason": null, "chunks": 0, "usage": null, "needle_found": false, "text_tail": "", "error": "HTTPError: HTTP Error 400: Bad Request body={\"error\":{\"message\":\"Prompt (1039982 tokens) requires ~45544MB GPU memory but only ~33559MB is available and the hot prefix cache holds ~0MB more, all of which can be reclaimed (~0MB \u2014 the shortfall is elsewhere), which is not enough. Reduce prompt size, lower --ctx-size, or use a smaller model.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":400,\"reason\":\"memory_refused\"}}", "http_timeout_s": 21600}
+{'tag': 'h32-0007-1040000-draft-on-r1-1040000', 'prompt_tokens': None, 'completion_tokens': None, 'prompt_tps': None, 'decode_tps': None, 'needle_found': False, 'error': 'HTTPError: HTTP Error 400: Bad Request body={"error":{"message":"Prompt (1039982 tokens) requires ~45544MB GPU memory but only ~33559MB is available and the hot prefix cache holds ~0MB more, all of which can be reclaimed (~0MB — the shortfall is elsewhere), which is not enough. Reduce prompt size, lower --ctx-size, or use a smaller model.","type":"invalid_request_error","param":null,"code":400,"reason":"memory_refused"}}', 'elapsed_s': 0.255294332979247, 'ttft_s': None}
+RUN_FAILED r=1 ctx=1040000
+00:07:49 CET bench h32-0007-1040000-draft-on-r2 ctx=1040000
+{"tag": "h32-0007-1040000-draft-on-r2-1040000", "elapsed_s": 0.02301816688850522, "ttft_s": null, "prompt_tokens": null, "completion_tokens": null, "prompt_tps": null, "decode_tps": null, "finish_reason": null, "chunks": 0, "usage": null, "needle_found": false, "text_tail": "", "error": "HTTPError: HTTP Error 400: Bad Request body={\"error\":{\"message\":\"Prompt (1039982 tokens) requires ~45544MB GPU memory but only ~33892MB is available and the hot prefix cache holds ~0MB more, all of which can be reclaimed (~0MB \u2014 the shortfall is elsewhere), which is not enough. Reduce prompt size, lower --ctx-size, or use a smaller model.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":400,\"reason\":\"memory_refused\"}}", "http_timeout_s": 21600}
+{'tag': 'h32-0007-1040000-draft-on-r2-1040000', 'prompt_tokens': None, 'completion_tokens': None, 'prompt_tps': None, 'decode_tps': None, 'needle_found': False, 'error': 'HTTPError: HTTP Error 400: Bad Request body={"error":{"message":"Prompt (1039982 tokens) requires ~45544MB GPU memory but only ~33892MB is available and the hot prefix cache holds ~0MB more, all of which can be reclaimed (~0MB — the shortfall is elsewhere), which is not enough. Reduce prompt size, lower --ctx-size, or use a smaller model.","type":"invalid_request_error","param":null,"code":400,"reason":"memory_refused"}}', 'elapsed_s': 0.02301816688850522, 'ttft_s': None}
+RUN_FAILED r=2 ctx=1040000
+RERUN_LONG_DONE ctx=1040000 fail=1 tag=h32-0007-1040000
+MLXSERVE_FAIL ctx=1040000
+mlxserve log /Users/tomascupr/.exo-inkling-bench/mlxserve/logs/serve-h32-0007-1040000-draft-on.log
+[admission] needed=4466 MB available=33625 MB reclaimable=0 MB width=4096 verdict=admit
+  <- 4078+16 tokens streamed [prefill: 1107.3 tok/s, decode: 115.0 tok/s] [length]
+[admission] needed=45544 MB available=33559 MB reclaimable=0 MB width=4096 verdict=refuse
+[admission] needed=45544 MB available=33892 MB reclaimable=0 MB width=4096 verdict=refuse
+[args] serve: 127.0.0.1:11241, ctx-size=1048576, pld=off, no-vision=true, prevent-sleep=true
+[wired] mode=max limit=53084 MB
+Prefill chunk: 4096 tokens (memory-sized down from 8192; --prefill-chunk overrides)
+Context size: 1048576 tokens (manual)
+Request timeout: 21600s
+RSS: 17.5G  Mem: 47%  CPU: 4%  GPU: 89%
+---- ours ctx=1040000 start 00:07:51 CET ----

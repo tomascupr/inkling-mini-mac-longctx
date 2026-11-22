@@ -1,0 +1,16 @@
+{
+ "tag": "h34-1040000-1040000-0",
+ "elapsed_s": 603.5174822499976,
+ "ttft_s": 603.5173832499422,
+ "prompt_tokens": null,
+ "completion_tokens": null,
+ "prompt_tps": null,
+ "decode_tps": null,
+ "finish_reason": null,
+ "chunks": 1,
+ "usage": null,
+ "needle_found": false,
+ "text_tail": "",
+ "error": null,
+ "http_timeout_s": 21600
+}

@@ -1,0 +1,9 @@
+00:22:03 CET starting ours TAG=tk2-32k STK=stack32 STEP=8192 PORT=52792 OV=/Users/tomascupr/.exo-inkling-bench/exact-work/s1/short/../stack32/ov
+tk2-32k 32768 0 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 790.538141911584, 'decode_tps': 77.06149829005467, 'needle_found': True, 'error': None, 'elapsed_s': 43.06253387499601, 'ttft_s': 41.427476125070825}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=43.052s prefill=867.9 tok/s decode=71.1 tok/s finish_reason=stop in_flight=0
+tk2-32k 32768 1 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 885.2927780693076, 'decode_tps': 85.55745946631926, 'needle_found': True, 'error': None, 'elapsed_s': 38.46610595821403, 'ttft_s': 36.9934114580974}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=38.458s prefill=888.0 tok/s decode=82.8 tok/s finish_reason=stop in_flight=0
+tk2-32k 32768 2 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 884.2858134802249, 'decode_tps': 85.61836547082818, 'needle_found': True, 'error': None, 'elapsed_s': 38.50718391616829, 'ttft_s': 37.035537041025236}
+LOG prompt_tokens=32750 generated_tokens=126 elapsed=38.499s prefill=887.0 tok/s decode=82.9 tok/s finish_reason=stop in_flight=0
+../stack16/srv3_long.sh: line 63: 58402 Terminated: 15          $PY -u -c "$START" --host 127.0.0.1 --port $PORT --model-dir $M --prefill-step-size ${STEP:-8192} --max-num-seqs 1 --max-tokens 8192 --log-level INFO >> $LOG 2>&1
+SRVDONE fail=0

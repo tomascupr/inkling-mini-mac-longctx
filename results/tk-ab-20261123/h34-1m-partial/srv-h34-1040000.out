@@ -1,0 +1,2 @@
+00:07:51 CET starting ours TAG=h34-1040000 STK=stack32 STEP=8192 PORT=52800 OV=/Users/tomascupr/.exo-inkling-bench/exact-work/s1/short/../stack32/ov
+h34-1040000 1040000 0 {'prompt_tokens': None, 'completion_tokens': None, 'prompt_tps': None, 'decode_tps': None, 'needle_found': False, 'error': None, 'elapsed_s': 603.5174822499976, 'ttft_s': 603.5173832499422}

@@ -1,0 +1,95 @@
+W1123 00:07:53.284000 57130 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+INFO:     Started server process [57130]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:52800 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52895 - "GET /health HTTP/1.1" 200 OK
+2026-11-23 00:07:54,013 - INFO - Loading model: /Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini
+2026-11-23 00:07:55,126 - INFO - Model and processor loaded successfully.
+2026-11-23 00:07:55,126 - INFO - Loading speculative drafter (auto): /Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini
+2026-11-23 00:07:55,149 - INFO - Auto-detected --draft-kind='dflash' for drafter '/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini' (model_type='inkling2_dspark').
+2026-11-23 00:07:55,149 - INFO - Auto-detected speculative draft kind: dflash
+2026-11-23 00:07:55,149 - INFO - Drafter ready; speculative decoding enabled.
+2026-11-23 00:07:56,699 - INFO - Request started: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True in_flight=1
+INFO:     127.0.0.1:52896 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+2026-11-23 00:07:57,454 - INFO - Generation queued: request=11ec52fd0 prompt_tokens=1039982 max_tokens=256 images=0 audio=0 videos=0
+2026-11-23 00:07:57,462 - INFO - Prefill started: request=11ec52fd0 backend=continuous_batching prompt_tokens=1039982 images=0 audio=0 videos=0
+2026-11-23 00:08:05,213 - INFO - Prefill progress: request=11ec52fd0 tokens=8192/1039982 (0.8%)
+2026-11-23 00:08:13,089 - INFO - Prefill progress: request=11ec52fd0 tokens=16384/1039982 (1.6%)
+2026-11-23 00:08:21,518 - INFO - Prefill progress: request=11ec52fd0 tokens=24576/1039982 (2.4%)
+2026-11-23 00:08:30,526 - INFO - Prefill progress: request=11ec52fd0 tokens=32768/1039982 (3.2%)
+2026-11-23 00:08:40,102 - INFO - Prefill progress: request=11ec52fd0 tokens=40960/1039982 (3.9%)
+2026-11-23 00:08:50,232 - INFO - Prefill progress: request=11ec52fd0 tokens=49152/1039982 (4.7%)
+2026-11-23 00:09:00,947 - INFO - Prefill progress: request=11ec52fd0 tokens=57344/1039982 (5.5%)
+2026-11-23 00:09:12,198 - INFO - Prefill progress: request=11ec52fd0 tokens=65536/1039982 (6.3%)
+2026-11-23 00:09:24,042 - INFO - Prefill progress: request=11ec52fd0 tokens=73728/1039982 (7.1%)
+2026-11-23 00:09:36,471 - INFO - Prefill progress: request=11ec52fd0 tokens=81920/1039982 (7.9%)
+2026-11-23 00:09:49,463 - INFO - Prefill progress: request=11ec52fd0 tokens=90112/1039982 (8.7%)
+2026-11-23 00:10:03,014 - INFO - Prefill progress: request=11ec52fd0 tokens=98304/1039982 (9.5%)
+2026-11-23 00:10:17,145 - INFO - Prefill progress: request=11ec52fd0 tokens=106496/1039982 (10.2%)
+2026-11-23 00:10:31,853 - INFO - Prefill progress: request=11ec52fd0 tokens=114688/1039982 (11.0%)
+2026-11-23 00:10:47,138 - INFO - Prefill progress: request=11ec52fd0 tokens=122880/1039982 (11.8%)
+2026-11-23 00:11:02,992 - INFO - Prefill progress: request=11ec52fd0 tokens=131072/1039982 (12.6%)
+2026-11-23 00:11:19,422 - INFO - Prefill progress: request=11ec52fd0 tokens=139264/1039982 (13.4%)
+2026-11-23 00:11:36,374 - INFO - Prefill progress: request=11ec52fd0 tokens=147456/1039982 (14.2%)
+2026-11-23 00:11:53,953 - INFO - Prefill progress: request=11ec52fd0 tokens=155648/1039982 (15.0%)
+2026-11-23 00:12:12,132 - INFO - Prefill progress: request=11ec52fd0 tokens=163840/1039982 (15.8%)
+2026-11-23 00:12:30,864 - INFO - Prefill progress: request=11ec52fd0 tokens=172032/1039982 (16.5%)
+2026-11-23 00:12:50,171 - INFO - Prefill progress: request=11ec52fd0 tokens=180224/1039982 (17.3%)
+2026-11-23 00:13:10,055 - INFO - Prefill progress: request=11ec52fd0 tokens=188416/1039982 (18.1%)
+2026-11-23 00:13:30,531 - INFO - Prefill progress: request=11ec52fd0 tokens=196608/1039982 (18.9%)
+2026-11-23 00:13:51,584 - INFO - Prefill progress: request=11ec52fd0 tokens=204800/1039982 (19.7%)
+2026-11-23 00:14:13,190 - INFO - Prefill progress: request=11ec52fd0 tokens=212992/1039982 (20.5%)
+2026-11-23 00:14:35,350 - INFO - Prefill progress: request=11ec52fd0 tokens=221184/1039982 (21.3%)
+2026-11-23 00:14:58,088 - INFO - Prefill progress: request=11ec52fd0 tokens=229376/1039982 (22.1%)
+2026-11-23 00:15:21,399 - INFO - Prefill progress: request=11ec52fd0 tokens=237568/1039982 (22.8%)
+2026-11-23 00:15:45,313 - INFO - Prefill progress: request=11ec52fd0 tokens=245760/1039982 (23.6%)
+2026-11-23 00:16:09,775 - INFO - Prefill progress: request=11ec52fd0 tokens=253952/1039982 (24.4%)
+2026-11-23 00:16:34,806 - INFO - Prefill progress: request=11ec52fd0 tokens=262144/1039982 (25.2%)
+2026-11-23 00:17:00,422 - INFO - Prefill progress: request=11ec52fd0 tokens=270336/1039982 (26.0%)
+2026-11-23 00:17:26,611 - INFO - Prefill progress: request=11ec52fd0 tokens=278528/1039982 (26.8%)
+2026-11-23 00:17:53,358 - INFO - Prefill progress: request=11ec52fd0 tokens=286720/1039982 (27.6%)
+2026-11-23 00:17:57,494 - WARNING - Request failed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True error=Timed out waiting for 600s for the next generated token. Increase MLX_VLM_TOKEN_QUEUE_TIMEOUT for long prefills, or reduce the prompt size. in_flight=0
+2026-11-23 00:17:57,494 - ERROR - Chat completion stream generation failed: Timed out waiting for 600s for the next generated token. Increase MLX_VLM_TOKEN_QUEUE_TIMEOUT for long prefills, or reduce the prompt size.
+Traceback (most recent call last):
+  File "/Users/tomascupr/.exo-inkling-bench/exact-work/s1/stack32/ov/mlx_vlm/server/generation.py", line 1044, in __next__
+    item = self._rqueue.get(timeout=self._queue_timeout)
+  File "/Users/tomascupr/.local/share/uv/python/cpython-3.13.12-macos-aarch64-none/lib/python3.13/queue.py", line 209, in get
+    raise Empty
+_queue.Empty
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/tomascupr/.exo-inkling-bench/exact-work/s1/stack32/ov/mlx_vlm/server/openai.py", line 2302, in stream_generator
+    token = await asyncio.to_thread(_next_token)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/tomascupr/.local/share/uv/python/cpython-3.13.12-macos-aarch64-none/lib/python3.13/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/tomascupr/.local/share/uv/python/cpython-3.13.12-macos-aarch64-none/lib/python3.13/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/Users/tomascupr/.exo-inkling-bench/exact-work/s1/stack32/ov/mlx_vlm/server/openai.py", line 2297, in _next_token
+    return next(token_iter)
+  File "/Users/tomascupr/.exo-inkling-bench/exact-work/s1/stack32/ov/mlx_vlm/server/generation.py", line 1053, in __next__
+    raise RuntimeError(
+    ...<4 lines>...
+    ) from exc
+RuntimeError: Timed out waiting for 600s for the next generated token. Increase MLX_VLM_TOKEN_QUEUE_TIMEOUT for long prefills, or reduce the prompt size.
+2026-11-23 00:17:59,224 - INFO - Request started: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True in_flight=1
+INFO:     127.0.0.1:53059 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+2026-11-23 00:18:00,023 - INFO - Generation queued: request=11ec1b230 prompt_tokens=1039982 max_tokens=256 images=0 audio=0 videos=0
+2026-11-23 00:18:20,720 - INFO - Prefill progress: request=11ec52fd0 tokens=294912/1039982 (28.4%)
+2026-11-23 00:18:20,740 - INFO - Prefill started: request=11ec1b230 backend=continuous_batching prompt_tokens=1039982 images=0 audio=0 videos=0
+2026-11-23 00:18:28,088 - INFO - Prefill progress: request=11ec1b230 tokens=8192/1039982 (0.8%)
+2026-11-23 00:18:35,976 - INFO - Prefill progress: request=11ec1b230 tokens=16384/1039982 (1.6%)
+2026-11-23 00:18:44,413 - INFO - Prefill progress: request=11ec1b230 tokens=24576/1039982 (2.4%)
+2026-11-23 00:18:53,421 - INFO - Prefill progress: request=11ec1b230 tokens=32768/1039982 (3.2%)
+2026-11-23 00:19:03,003 - INFO - Prefill progress: request=11ec1b230 tokens=40960/1039982 (3.9%)
+2026-11-23 00:19:13,136 - INFO - Prefill progress: request=11ec1b230 tokens=49152/1039982 (4.7%)
+2026-11-23 00:19:23,851 - INFO - Prefill progress: request=11ec1b230 tokens=57344/1039982 (5.5%)
+2026-11-23 00:19:35,111 - INFO - Prefill progress: request=11ec1b230 tokens=65536/1039982 (6.3%)
+2026-11-23 00:19:46,921 - INFO - Prefill progress: request=11ec1b230 tokens=73728/1039982 (7.1%)
+2026-11-23 00:19:59,342 - INFO - Prefill progress: request=11ec1b230 tokens=81920/1039982 (7.9%)
+2026-11-23 00:20:12,335 - INFO - Prefill progress: request=11ec1b230 tokens=90112/1039982 (8.7%)
+2026-11-23 00:20:25,890 - INFO - Prefill progress: request=11ec1b230 tokens=98304/1039982 (9.5%)

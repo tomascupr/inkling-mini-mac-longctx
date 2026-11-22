@@ -1,0 +1,12 @@
+TK A/B (MLX_VLM_INKLING2_SDPA_TK, sliding-window decode kernel, patches/0002), 2026-11-23 CET
+Host: Studio 1 (M4 Max 64 GB), stack32 overlay, official weights, draft on, step 8192, srv3_long.sh.
+TK=2, 32k, 3 requests, first dropped (server log values):
+  r1 reading 888.0 writing 82.8 | r2 reading 887.0 writing 82.9 | needle 3/3
+  mean drop-first: reading 887.5 tok/s, writing 82.85 tok/s
+Baseline (TK=4 default): h29/h30 32k, Studio 2 -> reading 927.8, writing 75.7
+Delta: reading -4.3%, writing +9.4%. CAVEAT: different machine (Studio 1 vs Studio 2), no same-machine TK=4 control run.
+
+1M (h34, Studio 1) paused 00:20 CET on Tomas's go:
+  MLX-Serve: refused both 1M requests (needs ~45.5 GB, ~33.6 GB available), no numbers.
+  Ours: request 0 hit the 600 s token-queue timeout while prefilling (client gave up at 603 s);
+  its prefill continued to 294912/1039982 (28.4%), request 1 overlapped and reached 90112 (8.7%) when stopped. No numbers.
