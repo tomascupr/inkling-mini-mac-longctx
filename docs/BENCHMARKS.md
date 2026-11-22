@@ -15,9 +15,9 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 
 | Context (prompt tokens) | Prefill tok/s | Decode tok/s | Peak MLX GiB | Stock prefill / decode / peak | Speed-up (prefill / decode) | Exactness |
 |---|---:|---:|---:|---|---|---|
-| 4k (4,078) | **951.3** | **47.55** | **19.46** | 758.4 / 33.09 / 25.58 | 1.25× / 1.44× | bit-identical to unpatched code |
-| 32k (32,750) | **865.5** | **44.63** | **20.34** | 667.9 / 27.0 / 28.27 | 1.30× / 1.65× | bit-identical to unpatched code |
-| 131k (131,054) | **624.5** | **34.28** | **23.34** | 401.9 / 16.2 / 33.58 | 1.55× / 2.12× | bit-identical to unpatched code |
+| 4k (4,078) | **951.8** | **50.64** | **19.46** | 758.4 / 33.09 / 25.58 | 1.25× / 1.53× | bit-identical to unpatched code |
+| 32k (32,750) | **865.3** | **47.23** | **20.34** | 667.9 / 27.0 / 28.27 | 1.30× / 1.75× | bit-identical to unpatched code |
+| 131k (131,054) | **624.3** | **35.80** | **23.34** | 401.9 / 16.2 / 33.58 | 1.55× / 2.21× | bit-identical to unpatched code |
 | 262k (262,126), default env, previous patch version | **448.7** | **23.86** | **33.06** | 256.4 / 10.7 / 35.38 | 1.75× / 2.23× | needle found (no 262k unpatched reference run) |
 
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
@@ -36,8 +36,8 @@ a speculative path built on our compiled decode step is work in progress.
 - "Stock" = `internet-projects/inkling2-mlx` v0.2.0 (mlx-vlm `0.8.0+inkling2mini.2`) on the
   same Mac, same weights and prompts; it needed smaller prefill steps (1024 / 512 / 256) to fit.
 - Starting code (unpatched betizzel fork) at step 2048, the reference for the bit-identity check: 845.5 / 33.46 / 26.19 GiB at 32k and 605.1 / 27.13 / 29.62 GiB at 131k.
-- 4k, 32k and 131k rows: current `stacked.patch` (2026-11-22 03:00 CET), recommended env, gate log
-  `results/gates/gate-20261122-0300.log`, runs `results/gates/g3-*.json`. The 4k reference is the unpatched fork at 4k
+- 4k, 32k and 131k rows: current `stacked.patch` (2026-11-22 03:20 CET), recommended env, gate log
+  `results/gates/gate-20261122-0320.log`, runs `results/gates/gate-*.json`. The 4k reference is the unpatched fork at 4k
   (941.5 / 35.27 / 25.10 GiB). The 262k row is the previous patch version (before decode v2) in the default MLX env
   (`results/gates/gate-default-env.log`). The prefix-cache row is the fork's server
   with APC on plus `0004-prefix-cache.patch` (the unpatched fork also hits the cache,
@@ -62,7 +62,7 @@ optimization log, step 2048; it was not part of the exactness gate.
 |---|---|---|
 | `patches/stacked.patch` | **Use this.** 0001 + 0002 + 0003 combined, against the fork. Gated above. | |
 | `patches/0001-exact-longctx-memory.patch` | Memory: last-token-only head (`logits_to_keep`), per-chunk text embedding, one-shot KV reservation (no concat growth), optional per-visit eval in prefill (`MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1`). Switches: `MLX_VLM_EXACT_CHUNK_EMBED=0`, `MLX_VLM_EXACT_KV_RESERVE=0`. 32k peak 26.2 → 22.2 GiB. | memory track |
-| `patches/0002-compiled-decode.patch` | Decode: one `mx.compile`d decode step (fewer graph nodes and kernels per token), wired into `generate_step`; v2 (2026-11-22) adds fused attention/MLP tails, norm+cast fusion, a decode attention kernel whose cost follows the live context length rather than the reserved KV size, and its own conv state (prefill working memory 0.43 GiB per 512-token step). All bit-identical. Applies on top of 0001. | Claude track |
+| `patches/0002-compiled-decode.patch` | Decode: one `mx.compile`d decode step (fewer graph nodes and kernels per token), wired into `generate_step`; v3 (2026-11-22 03:20) adds about a dozen fused kernels that copy MLX's own arithmetic order (attention-residual mixing, router, MoE output combine with its short convolution, l2-clips, norms, conv-state updates, merged attention projections), a decode attention kernel whose cost follows the live context length rather than the reserved KV size, and a fix so the saved conv state no longer keeps a whole prefill chunk alive (prefill working memory 0.43 GiB per 512-token step; projected 1M peak ~50.0 GiB). All bit-identical. Applies on top of 0001. | Claude track |
 | `patches/0003-prefill-attn-moe.patch` | Prefill: relative-attention kernel tiles (BQ=64, fast mask, global visits only) and a sort-free inverse permutation in the MoE (SwitchGLU) path, value-identical. Applies on top of 0001 + 0002. (Codex's compiled loop message gate, +0.6% prefill, is left out: it disabled the compiled decode path.) | Codex track |
 | `patches/0004-prefix-cache.patch` | Prefix cache: keep the fused attention kernel after a cached prefix is restored (no full mask over the whole cache), keep the conversation's reasoning effort in compaction so it hits the checkpoint, tests. Applies to the fork, and on top of `stacked.patch` (with fuzz). | prefix-cache track |
 
@@ -102,8 +102,8 @@ N tokens. (An earlier count charged every token the last chunk's depth, which ov
 
 | Context | GFLOP/token | Ceiling tok/s | Measured | % of ceiling |
 |---|---:|---:|---:|---:|
-| 32k | 10.95 | 1,297 | 865.5 | 66.7% |
-| 131k | 15.78 | 900 | 624.5 | 69.4% |
+| 32k | 10.95 | 1,297 | 865.3 | 66.7% |
+| 131k | 15.78 | 900 | 624.3 | 69.4% |
 | 262k | 22.22 | 639 | 448.7 | 70.2% |
 
 At 524k this is 18.4 PFLOP for the whole prompt (73% global attention), a floor of
@@ -118,8 +118,8 @@ Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 
 | Context | GB/token | Floor ms | Ceiling tok/s | Measured | % of ceiling |
 |---|---:|---:|---:|---:|---:|
-| 32k | 6.74 | 12.34 | 81.0 | 44.63 | 55% |
-| 131k | 9.96 | 18.24 | 54.8 | 34.28 | 63% |
+| 32k | 6.74 | 12.34 | 81.0 | 47.23 | 58% |
+| 131k | 9.96 | 18.24 | 54.8 | 35.80 | 65% |
 | 262k | 14.26 | 26.11 | 38.3 | 23.86 (previous version) | 62% |
 
 The remaining decode gap is mostly CPU-side graph build/encode (~17 ms/token) and CPU↔GPU

@@ -1,6 +1,6 @@
 diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
---- a/mlx_vlm/generate/ar.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/generate/ar.py	2026-11-22 02:59:20
+--- a/mlx_vlm/generate/ar.py	2026-11-22 03:20:34
++++ b/mlx_vlm/generate/ar.py	2026-11-22 03:20:35
 @@ -169,6 +169,41 @@
      return (values[0], values[0]) if len(values) == 1 else tuple(values)
  
@@ -118,8 +118,8 @@ diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
          y, logprobs = _step(input_ids, inputs_embeds=inputs_embeds)
  
 diff -ruN a/mlx_vlm/models/cache.py b/mlx_vlm/models/cache.py
---- a/mlx_vlm/models/cache.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/models/cache.py	2026-11-22 02:59:19
+--- a/mlx_vlm/models/cache.py	2026-11-22 03:20:34
++++ b/mlx_vlm/models/cache.py	2026-11-22 03:20:34
 @@ -510,7 +510,11 @@
          if self.keys is None or (prev + keys.shape[2]) > self.keys.shape[2]:
              B, n_kv_heads, _, k_head_dim = keys.shape
@@ -135,8 +135,8 @@ diff -ruN a/mlx_vlm/models/cache.py b/mlx_vlm/models/cache.py
              new_k = mx.zeros(k_shape, keys.dtype)
 diff -ruN a/mlx_vlm/models/inkling2/fast_decode.py b/mlx_vlm/models/inkling2/fast_decode.py
 --- a/mlx_vlm/models/inkling2/fast_decode.py	1970-01-01 01:00:00
-+++ b/mlx_vlm/models/inkling2/fast_decode.py	2026-11-22 02:59:20
-@@ -0,0 +1,231 @@
++++ b/mlx_vlm/models/inkling2/fast_decode.py	2026-11-22 03:20:34
+@@ -0,0 +1,233 @@
 +"""One compiled graph per single-token decode step (Inkling 2 / 2-loop).
 +
 +The eager decode step builds ~13k lazy nodes in Python (~5 ms) and encodes
@@ -173,6 +173,8 @@ diff -ruN a/mlx_vlm/models/inkling2/fast_decode.py b/mlx_vlm/models/inkling2/fas
 +    """One-time weight layout for decode. Changes no value that is computed:
 +    - FP32 copies of the router and loop-gate weights that every step casts
 +      to FP32 anyway (the casts become no-ops);
++    - the q, k and v message gates of each loop layer stacked, each gate's
++      weights a view of its slice (one batched chain per decode visit);
 +    - the NVFP4 experts' per-expert kernel factor, stored once;
 +    - the same-input attention projections stored as one row-wise
 +      concatenation, each projection's weight a view of its rows (memory is
@@ -369,8 +371,8 @@ diff -ruN a/mlx_vlm/models/inkling2/fast_decode.py b/mlx_vlm/models/inkling2/fas
 +        lm.__dict__["_compiled_decoder"] = dec
 +    return dec(token, cache)
 diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
---- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 02:59:20
+--- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 03:20:34
++++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 03:20:34
 @@ -1,6 +1,7 @@
  """Inference kernels that retain Inkling 2's FP32 intermediate arithmetic."""
  
@@ -379,7 +381,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
  from functools import lru_cache
  
  import mlx.core as mx
-@@ -55,6 +56,319 @@
+@@ -55,6 +56,587 @@
      )[0]
  
  
@@ -499,7 +501,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
 +        const uint sg = simdgroup_index_in_threadgroup;
 +        threadgroup float local_sums[32];
 +        threadgroup float inv_mean[1];
-+        const device float* xr = x + row * D + lid * 4;
++        const device I* xr = x + row * D + lid * 4;
 +        float acc = 0;
 +        for (int k = 0; k < 4; ++k) { float xi = xr[k]; acc += xi * xi; }
 +        acc = simd_sum(acc);
@@ -513,26 +515,173 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
 +        }
 +        threadgroup_barrier(mem_flags::mem_threadgroup);
 +        for (int k = 0; k < 4; ++k) {
-+            const float wk = float(w[lid * 4 + k]);
-+            out[row * D + lid * 4 + k] = static_cast<O>(wk * static_cast<float>(xr[k] * inv_mean[0]));
++            const float wk = HAS_W ? float(w[lid * 4 + k]) : 1.0f;
++            out[row * D + lid * 4 + k] = static_cast<O>(wk * static_cast<float>(float(xr[k]) * inv_mean[0]));
 +        }
 +        """,
 +    )
 +
 +
 +def rms_norm_cast(x, weight, eps, dtype):
-+    """mx.fast.rms_norm(x, weight, eps).astype(dtype) for FP32 rows x (..., D)
-+    with D / 4 threads per row (at most 1024)."""
++    """mx.fast.rms_norm(x.astype(f32), weight, eps).astype(dtype) for rows
++    x (..., D) (FP32 or BF16; weight BF16 or None) with D / 4 threads per row,
++    a multiple of 32 and at most 1024."""
 +    d = x.shape[-1]
 +    rows = x.size // d
 +    return _rms_norm_cast()(
-+        inputs=[x, weight, mx.array(eps, mx.float32)],
-+        template=[("O", dtype), ("D", d)],
++        inputs=[x, x if weight is None else weight, mx.array(eps, mx.float32)],
++        template=[("I", x.dtype), ("O", dtype), ("D", d), ("HAS_W", weight is not None)],
 +        grid=(rows * (d // 4), 1, 1),
 +        threadgroup=(d // 4, 1, 1),
 +        output_shapes=[x.shape],
 +        output_dtypes=[dtype],
 +    )[0]
++
++
++@lru_cache(maxsize=1)
++def _l2_clip_rows():
++    # language.l2_clip for a few rows in one kernel (one simdgroup per row):
++    # FP32 x (times the FP32 scale), the squares rounded (MLX's Square kernel:
++    # no fused multiply-add), MLX's row sum order (rows of 128: lane l adds its
++    # 4 consecutive squares, then simd_sum; rows of at most 32: sequential),
++    # precise sqrt, then x * min(threshold / (norm + 1e-6), 1) in the input dtype.
++    return mx.fast.metal_kernel(
++        name="inkling2_l2_clip_rows",
++        input_names=["x", "scale", "threshold"],
++        output_names=["out"],
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=r"""
++        const uint lane = thread_index_in_simdgroup;
++        const int row = int(threadgroup_position_in_grid.x * (threads_per_threadgroup.x / 32)
++                            + simdgroup_index_in_threadgroup);
++        if (row >= ROWS) return;
++        const int h = row % H;
++        float total = 0;
++        {
++            #pragma clang fp contract(off)
++            if (E == 128) {
++                for (int i = int(lane) * 4; i < int(lane) * 4 + 4; ++i) {
++                    float xi = float(x[row * E + i]);
++                    if (HAS_SCALE) xi = xi * float(scale[h * E + i]);
++                    const float sq = xi * xi;
++                    total = sq + total;
++                }
++                total = simd_sum(total);
++            } else {
++                if (lane == 0) {
++                    for (int i = 0; i < E; ++i) {
++                        float xi = float(x[row * E + i]);
++                        if (HAS_SCALE) xi = xi * float(scale[h * E + i]);
++                        const float sq = xi * xi;
++                        total = sq + total;
++                    }
++                }
++                total = simd_broadcast(total, 0);
++            }
++        }
++        const float factor = metal::min(threshold / (metal::precise::sqrt(total) + 1e-6f), 1.0f);
++        for (int i = int(lane); i < E; i += 32) {
++            float xi = float(x[row * E + i]);
++            if (HAS_SCALE) xi = xi * float(scale[h * E + i]);
++            out[row * E + i] = static_cast<T>(xi * factor);
++        }
++        """,
++    )
++
++
++def l2_clip_rows(x, threshold, scale=None):
++    """language.l2_clip(x, threshold, scale) for x (..., H, E) holding a few
++    rows, E == 128 or E <= 32, scale (H, E) or None."""
++    h, e = x.shape[-2:]
++    rows = x.size // e
++    return _l2_clip_rows()(
++        inputs=[x, x if scale is None else scale, mx.array(threshold, mx.float32)],
++        template=[("T", x.dtype), ("ROWS", rows), ("H", h), ("E", e),
++                  ("HAS_SCALE", scale is not None)],
++        grid=(rows * 32, 1, 1),
++        threadgroup=(32 * min(rows, 8), 1, 1),
++        output_shapes=[x.shape],
++        output_dtypes=[x.dtype],
++    )[0]
++
++
++@lru_cache(maxsize=1)
++def _router_scores():
++    # The router of one token: x.astype(f32) @ W.T as MLX's GEMV dispatches it
++    # for K >= 16 N (8 simdgroups split K, TN = 4 per lane, TM = 4 rows per
++    # threadgroup, simd_shuffle_down tree, sequential threadgroup sum), then
++    # MLX's sigmoid and -(scores + bias), in one kernel.
++    return mx.fast.metal_kernel(
++        name="inkling2_router_scores",
++        input_names=["x", "w", "bias"],
++        output_names=["scores", "neg"],
++        ensure_row_contiguous=True,
++        compile_options={"math_mode": "safe"},
++        source=r"""
++        constexpr int BN = 8, TM = 4, TN = 4, blockN = BN * 32 * TN;
++        threadgroup float tgp_memory[BN * (TM + TM)];
++        const uint lane = thread_index_in_simdgroup;
++        const uint sgN = simdgroup_index_in_threadgroup;
++        float result[TM] = {0, 0, 0, 0};
++        float inter[TN];
++        float v_coeff[TN];
++        int bn = (32 * int(sgN) + int(lane)) * TN;
++        const int out_row = threadgroup_position_in_grid.x * TM;
++        const device float* m = w + size_t(out_row) * K;
++        for (int i = 0; i < K / blockN; ++i) {
++            for (int tn = 0; tn < TN; tn++) v_coeff[tn] = float(x[bn + tn]);
++            int mat_offset = 0;
++            for (int tm = 0; tm < TM; tm++) {
++                for (int tn = 0; tn < TN; tn++) inter[tn] = m[mat_offset + bn + tn];
++                for (int tn = 0; tn < TN; tn++) result[tm] += inter[tn] * v_coeff[tn];
++                mat_offset += K;
++            }
++            bn += blockN;
++        }
++        if (K % blockN) {
++            for (int tn = 0; tn < TN; tn++) v_coeff[tn] = bn + tn < K ? float(x[bn + tn]) : 0.0f;
++            for (int tm = 0; tm < TM; tm++) {
++                for (int tn = 0; tn < TN; tn++) inter[tn] = bn + tn < K ? m[tm * K + bn + tn] : 0.0f;
++                for (int tn = 0; tn < TN; tn++) result[tm] += inter[tn] * v_coeff[tn];
++            }
++        }
++        for (int tm = 0; tm < TM; tm++)
++            for (ushort sn = 16; sn >= 1; sn >>= 1)
++                result[tm] += simd_shuffle_down(result[tm], sn);
++        threadgroup float* tgp_results = tgp_memory + sgN * (TM + TM);
++        if (lane == 0) {
++            for (int tm = 0; tm < TM; tm++) tgp_results[tm] = result[tm];
++            threadgroup_barrier(mem_flags::mem_none);
++            if (sgN == 0) {
++                for (int sgn = 1; sgn < BN; sgn++)
++                    for (int tm = 0; tm < TM; tm++) result[tm] += tgp_memory[sgn * (TM + TM) + tm];
++                for (int tm = 0; tm < TM; tm++) {
++                    const float s = result[tm];
++                    const float y = 1 / (1 + metal::precise::exp(metal::abs(s)));
++                    const float sig = (s < 0) ? y : 1 - y;
++                    scores[out_row + tm] = sig;
++                    neg[out_row + tm] = -(sig + bias[out_row + tm]);
++                }
++            }
++        }
++        """,
++    )
++
++
++def router_scores(x, weight, bias):
++    """(sigmoid(x.astype(f32) @ weight.T), -(scores + bias)) for one token x
++    (..., K) and an FP32 router weight (E, K) with E % 4 == 0."""
++    e, k = weight.shape
++    shape = (*x.shape[:-1], e)
++    return _router_scores()(
++        inputs=[x.reshape(-1), weight, bias],
++        template=[("K", k)],
++        grid=(e // 4 * 256, 1, 1),
++        threadgroup=(256, 1, 1),
++        output_shapes=[shape, shape],
++        output_dtypes=[mx.float32, mx.float32],
++    )
 +
 +
 +@lru_cache(maxsize=1)
@@ -610,59 +759,70 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
 +        output_names=["out", "keys"],
 +        compile_options={"math_mode": "safe"},
 +        source=r"""
++        // Rows are processed in parallel; each row's reductions keep MLX's
++        // lane assignment and order (thread t: elements 4t..4t+3 of the row).
 +        const uint lid = thread_position_in_threadgroup.x;
 +        const uint lane = thread_index_in_simdgroup;
 +        const uint sg = simdgroup_index_in_threadgroup;
-+        threadgroup float local_sums[32];
-+        threadgroup float inv_mean[1];
-+        threadgroup float partial[8];
-+        threadgroup float scores[8];
-+        for (int i = 0; i < NS; ++i) {
-+            const device T* xr = states + i * D + lid * 4;
-+            float acc = 0;
-+            for (int k = 0; k < 4; ++k) { float xi = xr[k]; acc += xi * xi; }
-+            acc = simd_sum(acc);
-+            if (sg == 0) local_sums[lane] = 0;
-+            threadgroup_barrier(mem_flags::mem_threadgroup);
-+            if (lane == 0) local_sums[sg] = acc;
-+            threadgroup_barrier(mem_flags::mem_threadgroup);
-+            if (sg == 0) {
-+                acc = simd_sum(local_sums[lane]);
-+                if (lane == 0) inv_mean[0] = metal::precise::rsqrt(acc / D + 1e-6f);
++        constexpr int NT = D / 4;
++        threadgroup float local_sums[NS][32];
++        threadgroup float inv_mean[NS];
++        threadgroup float partial[NS][8];
++        threadgroup float scores[NS];
++        if (lid < uint(NS * 32)) local_sums[lid / 32][lid % 32] = 0;
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid < uint(NT)) {
++            for (int i = 0; i < NS; ++i) {
++                const device T* xr = states + i * D + lid * 4;
++                float acc = 0;
++                for (int k = 0; k < 4; ++k) { float xi = xr[k]; acc += xi * xi; }
++                acc = simd_sum(acc);
++                if (lane == 0) local_sums[i][sg] = acc;
 +            }
-+            threadgroup_barrier(mem_flags::mem_threadgroup);
-+            for (int k = 0; k < 4; ++k)
-+                keys[i * D + lid * 4 + k] = 1.0f * static_cast<float>(float(xr[k]) * inv_mean[0]);
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (sg < uint(NS)) {
++            float acc = simd_sum(local_sums[sg][lane]);
++            if (lane == 0) inv_mean[sg] = metal::precise::rsqrt(acc / D + 1e-6f);
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid < uint(NT)) {
++            for (int i = 0; i < NS; ++i) {
++                const device T* xr = states + i * D + lid * 4;
++                for (int k = 0; k < 4; ++k)
++                    keys[i * D + lid * 4 + k] = 1.0f * static_cast<float>(float(xr[k]) * inv_mean[i]);
++            }
 +        }
 +        threadgroup_barrier(mem_flags::mem_device);
-+        for (int i = 0; i < NS; ++i) {
-+            if (sg < 8) {
-+                float result = 0;
-+                int bn = (32 * int(sg) + int(lane)) * 4;
-+                for (int it = 0; it < D / 1024; ++it) {
-+                    float v[4], m[4];
-+                    for (int tn = 0; tn < 4; ++tn) v[tn] = query[bn + tn];
-+                    for (int tn = 0; tn < 4; ++tn) m[tn] = keys[i * D + bn + tn];
-+                    for (int tn = 0; tn < 4; ++tn) result += m[tn] * v[tn];
-+                    bn += 1024;
-+                }
-+                if (D % 1024) {
-+                    float v[4], m[4];
-+                    for (int tn = 0; tn < 4; ++tn) v[tn] = bn + tn < D ? query[bn + tn] : 0.0f;
-+                    for (int tn = 0; tn < 4; ++tn) m[tn] = bn + tn < D ? keys[i * D + bn + tn] : 0.0f;
-+                    for (int tn = 0; tn < 4; ++tn) result += m[tn] * v[tn];
-+                }
-+                for (ushort s = 16; s >= 1; s >>= 1) result += simd_shuffle_down(result, s);
-+                if (lane == 0) partial[sg] = result;
++        // Scores GEMV: task (row i, split sgn) per simdgroup.
++        for (int t = int(sg); t < 8 * NS; t += 32) {
++            const int i = t / 8, sgn = t % 8;
++            float result = 0;
++            int bn = (32 * sgn + int(lane)) * 4;
++            for (int it = 0; it < D / 1024; ++it) {
++                float v[4], m[4];
++                for (int tn = 0; tn < 4; ++tn) v[tn] = query[bn + tn];
++                for (int tn = 0; tn < 4; ++tn) m[tn] = keys[i * D + bn + tn];
++                for (int tn = 0; tn < 4; ++tn) result += m[tn] * v[tn];
++                bn += 1024;
 +            }
-+            threadgroup_barrier(mem_flags::mem_threadgroup);
-+            if (lid == 0) {
-+                float r = partial[0];
-+                for (int s = 1; s < 8; ++s) r += partial[s];
-+                scores[i] = r * scale;
++            if (D % 1024) {
++                float v[4], m[4];
++                for (int tn = 0; tn < 4; ++tn) v[tn] = bn + tn < D ? query[bn + tn] : 0.0f;
++                for (int tn = 0; tn < 4; ++tn) m[tn] = bn + tn < D ? keys[i * D + bn + tn] : 0.0f;
++                for (int tn = 0; tn < 4; ++tn) result += m[tn] * v[tn];
 +            }
-+            threadgroup_barrier(mem_flags::mem_threadgroup);
++            for (ushort s = 16; s >= 1; s >>= 1) result += simd_shuffle_down(result, s);
++            if (lane == 0) partial[i][sgn] = result;
 +        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid < uint(NS)) {
++            float r = partial[lid][0];
++            for (int s = 1; s < 8; ++s) r += partial[lid][s];
++            scores[lid] = r * scale;
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid >= uint(NT)) return;
 +        float m = scores[0];
 +        for (int i = 1; i < NS; ++i) m = max(m, scores[i]);
 +        float e[NS];
@@ -688,8 +848,118 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
 +    out, _ = _attention_residual_q1()(
 +        inputs=[states, query, mx.array(scale, mx.float32)],
 +        template=[("T", states.dtype), ("NS", n), ("D", d)],
-+        grid=(d // 4, 1, 1),
-+        threadgroup=(d // 4, 1, 1),
++        grid=(1024, 1, 1),
++        threadgroup=(1024, 1, 1),
++        output_shapes=[(1, d), (n, d)],
++        output_dtypes=[mx.float32, mx.float32],
++    )
++    return out
++
++
++@lru_cache(maxsize=1)
++def _attention_residual_q1_list():
++    # _attention_residual_q1 reading the n states from separate arrays (the
++    # blocks and the partial, each converted to FP32 on load as mx.stack and
++    # astype would): no stacked copy.
++    return mx.fast.metal_kernel(
++        name="inkling2_attention_residual_q1_list",
++        input_names=["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "query", "scale"],
++        output_names=["out", "keys"],
++        compile_options={"math_mode": "safe"},
++        source=r"""
++        #define LOADX(i, j) ((i) == 0 ? float(s0[j]) : (i) == 1 ? float(s1[j]) : (i) == 2 ? float(s2[j]) \
++            : (i) == 3 ? float(s3[j]) : (i) == 4 ? float(s4[j]) : (i) == 5 ? float(s5[j]) \
++            : (i) == 6 ? float(s6[j]) : float(s7[j]))
++        // Rows are processed in parallel; each row's reductions keep MLX's
++        // lane assignment and order (thread t: elements 4t..4t+3 of the row).
++        const uint lid = thread_position_in_threadgroup.x;
++        const uint lane = thread_index_in_simdgroup;
++        const uint sg = simdgroup_index_in_threadgroup;
++        constexpr int NT = D / 4;
++        threadgroup float local_sums[NS][32];
++        threadgroup float inv_mean[NS];
++        threadgroup float partial[NS][8];
++        threadgroup float scores[NS];
++        if (lid < uint(NS * 32)) local_sums[lid / 32][lid % 32] = 0;
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid < uint(NT)) {
++            for (int i = 0; i < NS; ++i) {
++                float acc = 0;
++                for (int k = 0; k < 4; ++k) { float xi = LOADX(i, lid * 4 + k); acc += xi * xi; }
++                acc = simd_sum(acc);
++                if (lane == 0) local_sums[i][sg] = acc;
++            }
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (sg < uint(NS)) {
++            float acc = simd_sum(local_sums[sg][lane]);
++            if (lane == 0) inv_mean[sg] = metal::precise::rsqrt(acc / D + 1e-6f);
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid < uint(NT)) {
++            for (int i = 0; i < NS; ++i) {
++                for (int k = 0; k < 4; ++k)
++                    keys[i * D + lid * 4 + k] = 1.0f * static_cast<float>(LOADX(i, lid * 4 + k) * inv_mean[i]);
++            }
++        }
++        threadgroup_barrier(mem_flags::mem_device);
++        // Scores GEMV: task (row i, split sgn) per simdgroup.
++        for (int t = int(sg); t < 8 * NS; t += 32) {
++            const int i = t / 8, sgn = t % 8;
++            float result = 0;
++            int bn = (32 * sgn + int(lane)) * 4;
++            for (int it = 0; it < D / 1024; ++it) {
++                float v[4], m[4];
++                for (int tn = 0; tn < 4; ++tn) v[tn] = query[bn + tn];
++                for (int tn = 0; tn < 4; ++tn) m[tn] = keys[i * D + bn + tn];
++                for (int tn = 0; tn < 4; ++tn) result += m[tn] * v[tn];
++                bn += 1024;
++            }
++            if (D % 1024) {
++                float v[4], m[4];
++                for (int tn = 0; tn < 4; ++tn) v[tn] = bn + tn < D ? query[bn + tn] : 0.0f;
++                for (int tn = 0; tn < 4; ++tn) m[tn] = bn + tn < D ? keys[i * D + bn + tn] : 0.0f;
++                for (int tn = 0; tn < 4; ++tn) result += m[tn] * v[tn];
++            }
++            for (ushort s = 16; s >= 1; s >>= 1) result += simd_shuffle_down(result, s);
++            if (lane == 0) partial[i][sgn] = result;
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid < uint(NS)) {
++            float r = partial[lid][0];
++            for (int s = 1; s < 8; ++s) r += partial[lid][s];
++            scores[lid] = r * scale;
++        }
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        if (lid >= uint(NT)) return;
++        float m = scores[0];
++        for (int i = 1; i < NS; ++i) m = max(m, scores[i]);
++        float e[NS];
++        float total = 0;
++        for (int i = 0; i < NS; ++i) { e[i] = metal::precise::exp(scores[i] - m); total = e[i] + total; }
++        float w[NS];
++        for (int i = 0; i < NS; ++i) w[i] = e[i] / total;
++        for (int tn = 0; tn < 4; ++tn) {
++            const int d = lid * 4 + tn;
++            float r[8] = {0, 0, 0, 0, 0, 0, 0, 0};
++            for (int i = 0; i < NS; ++i) r[i / 4] += w[i] * keys[i * D + d];
++            out[d] = ((r[0] + r[4]) + (r[2] + r[6])) + ((r[1] + r[5]) + (r[3] + r[7]));
++        }
++        """,
++    )
++
++
++def attention_residual_q1_list(states, query, scale):
++    """attention_residual_q1 for a list of 2..8 single-position states, each
++    of D elements. Returns (1, D) FP32."""
++    n, d = len(states), states[0].size
++    flat = [a.reshape(d) for a in states]
++    flat += [flat[0]] * (8 - n)
++    out, _ = _attention_residual_q1_list()(
++        inputs=[*flat, query, mx.array(scale, mx.float32)],
++        template=[("NS", n), ("D", d)],
++        grid=(1024, 1, 1),
++        threadgroup=(1024, 1, 1),
 +        output_shapes=[(1, d), (n, d)],
 +        output_dtypes=[mx.float32, mx.float32],
 +    )
@@ -699,7 +969,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
  # Rows of the head per simdgroup, and simdgroups per threadgroup.
  _HEAD_ROWS = 4
  _HEAD_SIMDGROUPS = 8
-@@ -153,6 +467,8 @@
+@@ -153,6 +735,8 @@
          const int g = threadgroup_position_in_grid.y;
          const int S = sizes[0];
          const int start = block * BS;
@@ -708,7 +978,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
          const int end = min(start + BS, S);
          // Keys before key_start are a batch row's left padding.
          const int first = max(start, key_start[0]);
-@@ -170,14 +486,26 @@
+@@ -170,14 +754,26 @@
          }
          const device T* k_head = k + g * k_strides[1];
          const device T* v_head = v + g * v_strides[1];
@@ -740,7 +1010,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              const int dist = S - 1 - j;
              for (int h = 0; h < G; ++h) {
                  float s = 0.0f;
-@@ -252,12 +580,15 @@
+@@ -252,12 +848,15 @@
      )
  
  
@@ -757,7 +1027,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      Returns (1, HQ, 1, D) in q's dtype.
      """
      _, hq, _, d = q.shape
-@@ -265,6 +596,11 @@
+@@ -265,6 +864,11 @@
      nblocks = (s + _DECODE_BLOCK - 1) // _DECODE_BLOCK
      if key_start is None:
          key_start = mx.zeros((1,), mx.int32)
@@ -769,7 +1039,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      common = [("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv)]
      part_max, part_sum, part_acc = _decode_partials()(
          inputs=[
-@@ -273,7 +609,7 @@
+@@ -273,7 +877,7 @@
              v,
              mx.contiguous(rel),
              key_start.astype(mx.int32),
@@ -778,7 +1048,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              mx.array(scale, dtype=mx.float32),
          ],
          template=[*common, ("REL", rel.shape[-1]), ("BS", _DECODE_BLOCK),
-@@ -283,9 +619,19 @@
+@@ -283,9 +887,19 @@
          output_shapes=[(nblocks * hq,), (nblocks * hq,), (nblocks * hq, d)],
          output_dtypes=[mx.float32, mx.float32, mx.float32],
      )
@@ -799,7 +1069,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
          template=[*common],
          grid=(hq * d, 1, 1),
          threadgroup=(d, 1, 1),
-@@ -299,34 +645,69 @@
+@@ -299,34 +913,69 @@
  # (mlx_lm/models/inkling2/kernels.py, Copyright 2026 Apple Inc., MIT License).
  # Causal flash attention with a relative position bias and a sink logit per
  # query.
@@ -880,7 +1150,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      const bool row_ok = row < L;
      const int diag = S - L + row;
  
-@@ -383,7 +764,7 @@
+@@ -383,7 +1032,7 @@
              }
          }
          threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -889,7 +1159,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              continue;
          }
  
-@@ -397,22 +778,43 @@
+@@ -397,22 +1046,43 @@
              }
          }
  
@@ -946,7 +1216,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              }
          }
          // The 4 lanes of a row are lane ^ 1 and lane ^ 8 apart.
-@@ -454,11 +856,12 @@
+@@ -454,11 +1124,12 @@
  """
  
  _relative_attention_kernel = mx.fast.metal_kernel(
@@ -960,7 +1230,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
  )
  
  
-@@ -479,6 +882,9 @@
+@@ -479,6 +1150,9 @@
      (B, L, Hq, D)."""
      B, Hq, L, D = q.shape
      Hkv, S = k.shape[1], k.shape[2]
@@ -970,7 +1240,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      return _relative_attention_kernel(
          inputs=[
              q,
-@@ -497,11 +903,15 @@
+@@ -497,11 +1171,15 @@
              ("HKV", Hkv),
              ("R", rel.shape[-1]),
              ("WINDOW", window),
@@ -991,9 +1261,9 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
          output_dtypes=[q.dtype],
      )[0]
 diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/language.py
---- a/mlx_vlm/models/inkling2/language.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/models/inkling2/language.py	2026-11-22 02:59:20
-@@ -37,15 +37,70 @@
+--- a/mlx_vlm/models/inkling2/language.py	2026-11-22 03:20:34
++++ b/mlx_vlm/models/inkling2/language.py	2026-11-22 03:20:34
+@@ -37,15 +37,72 @@
  )
  from ..switch_layers import SwitchGLU
  from .config import TextConfig, validate_sharding
@@ -1025,6 +1295,8 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
 +_FUSED_MLP_TAIL = _os.environ.get("MLX_VLM_INKLING2_FUSED_MLP_TAIL", "1") == "1"
 +_FUSED_ATTN_TAIL = _os.environ.get("MLX_VLM_INKLING2_FUSED_ATTN_TAIL", "1") == "1"
 +_FUSED_NORM_CAST = _os.environ.get("MLX_VLM_INKLING2_FUSED_NORM_CAST", "1") == "1"
++_FUSED_ROUTER = _os.environ.get("MLX_VLM_INKLING2_FUSED_ROUTER", "1") == "1"
++_FUSED_L2_CLIP = _os.environ.get("MLX_VLM_INKLING2_FUSED_L2_CLIP", "1") == "1"
 +
 +
 +def _norm_cast(norm, x, dtype):
@@ -1066,7 +1338,51 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
  @mx.compile
  def l2_clip(x, threshold, scale=None):
      dtype = x.dtype
-@@ -175,6 +230,13 @@
+@@ -56,6 +113,26 @@
+     return (x * mx.minimum(threshold / (norm + 1e-6), 1.0)).astype(dtype)
+ 
+ 
++def _l2_clip(x, threshold, scale=None):
++    """l2_clip; for one decode token's head rows (128 or at most 32 wide) the
++    same arithmetic as one kernel (kernels.l2_clip_rows)."""
++    e = x.shape[-1]
++    if (
++        _FUSED_L2_CLIP
++        and x.ndim == 4
++        and x.shape[0] * x.shape[1] == 1
++        and (e == 128 or e <= 32)
++        and x.dtype == mx.bfloat16
++        and (scale is None or (scale.dtype == mx.bfloat16 and scale.shape == x.shape[-2:]))
++        and mx.metal.is_available()
++        and mx.default_device() == mx.gpu
++    ):
++        from .kernels import l2_clip_rows
++
++        return l2_clip_rows(x, threshold, scale)
++    return l2_clip(x, threshold, scale)
++
++
+ @mx.compile
+ def _softcapped_swiglu(up, gate, gate_cap, up_cap):
+     dtype = gate.dtype
+@@ -80,6 +157,16 @@
+ 
+ 
+ @mx.compile
++def _route_select(scores, neg, top_k, route_scale):
++    """_route after its scores (kernels.router_scores): the same operations."""
++    indices = mx.argpartition(neg, top_k - 1, axis=-1)[..., :top_k]
++    indices = mx.stop_gradient(indices)
++    weights = mx.take_along_axis(scores, indices, axis=-1)
++    weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20) * route_scale
++    return indices, weights
++
++
++@mx.compile
+ def _combine_routes(out, weights):
+     return (out.astype(mx.float32) * weights[..., None]).sum(axis=-2).astype(out.dtype)
+ 
+@@ -175,6 +262,13 @@
              cache.record_speculative_window(
                  index, mx.concatenate([state, inputs], axis=1), state.shape[1]
              )
@@ -1080,7 +1396,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
      cache[index] = final
  
  
-@@ -196,8 +258,22 @@
+@@ -196,8 +290,22 @@
              and mx.metal.is_available()
              and mx.default_device() == mx.gpu
          ):
@@ -1104,7 +1420,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
              # Temporal selection promotes selected BF16 values into FP32 state.
              # Invalid positions never enter that state. The convolution itself
              # reads masked inputs directly, without materializing a concat.
-@@ -382,14 +458,45 @@
+@@ -382,43 +490,88 @@
          weight = mx.pad(projection.weight, ((start, width - start), (0, 0)))
          return (x @ weight.T)[..., start : start + width]
  
@@ -1152,22 +1468,47 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
          if self.is_sliding:
              k = self.k_sconv(k, conv, conv_mask)
              v = self.v_sconv(v, conv, conv_mask)
-@@ -397,9 +504,7 @@
+         else:
              k = self.k_sconv(k, key_input, conv, conv_mask)
              v = self.v_sconv(v, value_input, conv, conv_mask)
-         q = l2_clip(
+-        q = l2_clip(
 -            self._project(self.q_proj, x).reshape(
 -                b, length, self.n_heads, self.head_dim
 -            ),
++        q = _l2_clip(
 +            q_rows.reshape(b, length, self.n_heads, self.head_dim),
              cfg.qk_l2_clip_threshold,
              self.q_scale,
          )
-@@ -412,13 +517,15 @@
-                 x.dtype
-             )
-         r = l2_clip(
+-        k = l2_clip(
++        k = _l2_clip(
+             k.reshape(b, length, self.n_kv, self.head_dim), cfg.qk_l2_clip_threshold
+         )
+         v = v.reshape(b, length, self.n_kv, self.head_dim)
+         if cfg.use_value_norm_no_gamma:
+-            v = mx.fast.rms_norm(v.astype(mx.float32), None, cfg.rms_norm_eps).astype(
+-                x.dtype
+-            )
+-        r = l2_clip(
 -            self._project(self.r_proj, x).reshape(b, length, self.n_heads, cfg.d_rel),
++            if (
++                _FUSED_NORM_CAST
++                and b * length == 1
++                and v.dtype == x.dtype == mx.bfloat16
++                and self.head_dim % 128 == 0
++                and self.head_dim // 4 <= 1024
++                and mx.metal.is_available()
++                and mx.default_device() == mx.gpu
++            ):
++                # One decode token: the casts and the norm in one kernel.
++                from .kernels import rms_norm_cast
++
++                v = rms_norm_cast(v, None, cfg.rms_norm_eps, x.dtype)
++            else:
++                v = mx.fast.rms_norm(
++                    v.astype(mx.float32), None, cfg.rms_norm_eps
++                ).astype(x.dtype)
++        r = _l2_clip(
 +            r_rows.reshape(b, length, self.n_heads, cfg.d_rel),
              cfg.rel_l2_clip_threshold,
              self.rel_scale,
@@ -1181,7 +1522,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
              tau = 1 + cfg.log_scaling_alpha * mx.log(
                  mx.maximum(positions / cfg.log_scaling_n_floor, 1)
              )
-@@ -434,9 +541,10 @@
+@@ -434,9 +587,10 @@
          else:
              out = self._masked_attention(x, q, k, v, r, kv)
          out = out.transpose(0, 2, 1, 3).reshape(b, length, -1)
@@ -1194,7 +1535,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
          ).astype(x.dtype)
          # Every output dot still consumes all heads on one rank. Gather the
          # heads first, project complete output rows, then restore hidden order.
-@@ -453,6 +561,9 @@
+@@ -453,6 +607,9 @@
          rotating = isinstance(kv, (RotatingKVCache, BatchRotatingKVCache))
          k, v = kv.update_and_fetch(k, v)
          size = k.shape[2]
@@ -1204,7 +1545,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
          rel = r[0, 0] @ self.rel_proj.astype(x.dtype)
          sinks = self.sink_proj(x)[0, 0]
          if self.sharding_group is not None:
-@@ -461,7 +572,7 @@
+@@ -461,7 +618,7 @@
          start = kv.left_padding[:1] if batched else None
          if (
              not rotating
@@ -1213,7 +1554,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
              and q.dtype == k.dtype == v.dtype == mx.bfloat16
              and self.head_dim % 32 == 0
              and mx.metal.is_available()
-@@ -479,8 +590,9 @@
+@@ -479,8 +636,9 @@
                  sinks,
                  scale=self.head_dim**-0.5,
                  key_start=None if start is None else mx.maximum(start, 0),
@@ -1224,7 +1565,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
          if rotating:
              # After an in-place decode write the oldest key sits at the write index.
              slots = (slots - kv._idx) % size
-@@ -593,6 +705,20 @@
+@@ -593,6 +751,39 @@
              activation=SoftcappedSwiGLU(config),
          )
  
@@ -1233,26 +1574,64 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
 +        before their weighted sum (single rank); None otherwise."""
 +        if self.sharding_group is not None or x.shape[:2] != (1, 1):
 +            return None
-+        indices, weights = _route(
-+            x,
-+            self.gate_weight,
-+            self.e_score_correction_bias,
-+            self.top_k,
-+            self.route_scale,
-+        )
++        e, k = self.gate_weight.shape
++        if (
++            _FUSED_ROUTER
++            and self.gate_weight.dtype == mx.float32
++            and self.e_score_correction_bias.dtype == mx.float32
++            and x.dtype in (mx.bfloat16, mx.float32)
++            and e % 4 == 0
++            and k % 4 == 0
++            and mx.metal.is_available()
++            and mx.default_device() == mx.gpu
++        ):
++            # The router GEMV, sigmoid and biased negation as one kernel.
++            from .kernels import router_scores
++
++            scores, neg = router_scores(
++                x, self.gate_weight, self.e_score_correction_bias
++            )
++            indices, weights = _route_select(scores, neg, self.top_k, self.route_scale)
++        else:
++            indices, weights = _route(
++                x,
++                self.gate_weight,
++                self.e_score_correction_bias,
++                self.top_k,
++                self.route_scale,
++            )
 +        return self.switch_mlp(x, indices), weights
 +
      def __call__(self, x):
          indices, weights = _route(
              x,
-@@ -632,11 +758,29 @@
+@@ -632,11 +823,48 @@
          self.normalize_values = config.attn_res_normalize_values
  
      def __call__(self, blocks, partial):
 -        return _attention_residual(
 -            mx.stack([*blocks, partial], axis=-2), self.query, self.normalize_values
 -        )
-+        states = mx.stack([*blocks, partial], axis=-2)
++        arrays = [*blocks, partial]
++        d = partial.shape[-1]
++        if (
++            _FUSED_ATTN_RES
++            and self.query.ndim == 1
++            and self.query.dtype == mx.float32
++            and self.normalize_values
++            and 2 <= len(arrays) <= 8
++            and d % 128 == 0
++            and d // 4 <= 1024
++            and all(a.size == d and a.dtype in (mx.float32, mx.bfloat16) for a in arrays)
++            and mx.metal.is_available()
++            and mx.default_device() == mx.gpu
++        ):
++            # One position, one query: the states read in place (no stack).
++            from .kernels import attention_residual_q1_list
+ 
++            out = attention_residual_q1_list(arrays, self.query, d**-0.5)
++            return out.reshape(*partial.shape[:-1], 1, d)
++        states = mx.stack(arrays, axis=-2)
 +        n, d = states.shape[-2:]
 +        if (
 +            _FUSED_ATTN_RES
@@ -1261,7 +1640,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
 +            and self.normalize_values
 +            and math.prod(states.shape[:-2]) == 1
 +            and 2 <= n <= 8
-+            and d % 4 == 0
++            and d % 128 == 0
 +            and d // 4 <= 1024
 +            and states.dtype in (mx.float32, mx.bfloat16)
 +            and mx.metal.is_available()
@@ -1273,12 +1652,12 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
 +            out = attention_residual_q1(states.reshape(n, d), self.query, d**-0.5)
 +            return out.reshape(*states.shape[:-2], 1, d)
 +        return _attention_residual(states, self.query, self.normalize_values)
- 
++
 +
  class DecoderLayer(nn.Module):
      def __init__(self, config, layer_idx):
          super().__init__()
-@@ -674,14 +818,14 @@
+@@ -674,14 +902,14 @@
          )
          if self.is_sliding:
              attn = self.self_attn(
@@ -1295,7 +1674,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
                  for norm, part in zip(
                      (
                          self.q_input_layernorm,
-@@ -692,21 +836,88 @@
+@@ -692,21 +920,88 @@
                  )
              ]
              attn = self.self_attn(*parts, cache=cache, conv_mask=mask)
@@ -1392,7 +1771,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
  class TextModel(nn.Module):
      def __init__(self, config):
          super().__init__()
-@@ -803,11 +1014,22 @@
+@@ -803,11 +1098,22 @@
              pre_norm, captured = (
                  result if capture_layer_ids is not None else (result, None)
              )
@@ -1418,7 +1797,7 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
                      captured
 diff -ruN a/mlx_vlm/models/inkling2/step_cache.py b/mlx_vlm/models/inkling2/step_cache.py
 --- a/mlx_vlm/models/inkling2/step_cache.py	1970-01-01 01:00:00
-+++ b/mlx_vlm/models/inkling2/step_cache.py	2026-11-22 02:59:20
++++ b/mlx_vlm/models/inkling2/step_cache.py	2026-11-22 03:20:34
 @@ -0,0 +1,69 @@
 +"""Functional views of Inkling 2 decode caches for a compiled decode step.
 +
@@ -1490,8 +1869,8 @@ diff -ruN a/mlx_vlm/models/inkling2/step_cache.py b/mlx_vlm/models/inkling2/step
 +    def advance(self, n):
 +        pass
 diff -ruN a/mlx_vlm/models/inkling2_loop/language.py b/mlx_vlm/models/inkling2_loop/language.py
---- a/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 02:59:19
+--- a/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 03:20:34
++++ b/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 03:20:34
 @@ -19,10 +19,17 @@
  from ..inkling.language import _cache_padding_mask
  from ..inkling2.language import AttentionResidual, DecoderLayer
@@ -1623,8 +2002,8 @@ diff -ruN a/mlx_vlm/models/inkling2_loop/language.py b/mlx_vlm/models/inkling2_l
          normalized = self.norm(h).astype(x.dtype)
          if total in requested:
 diff -ruN a/mlx_vlm/models/switch_layers.py b/mlx_vlm/models/switch_layers.py
---- a/mlx_vlm/models/switch_layers.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/models/switch_layers.py	2026-11-22 02:59:20
+--- a/mlx_vlm/models/switch_layers.py	2026-11-22 03:20:34
++++ b/mlx_vlm/models/switch_layers.py	2026-11-22 03:20:35
 @@ -83,11 +83,32 @@
              weights[f"{target}.{suffix}"] = weights.pop(key)
  
@@ -1668,8 +2047,8 @@ diff -ruN a/mlx_vlm/models/switch_layers.py b/mlx_vlm/models/switch_layers.py
              transpose=True,
              group_size=self.group_size,
 diff -ruN a/mlx_vlm/quantization/nvfp4.py b/mlx_vlm/quantization/nvfp4.py
---- a/mlx_vlm/quantization/nvfp4.py	2026-11-22 02:59:19
-+++ b/mlx_vlm/quantization/nvfp4.py	2026-11-22 02:59:20
+--- a/mlx_vlm/quantization/nvfp4.py	2026-11-22 03:20:34
++++ b/mlx_vlm/quantization/nvfp4.py	2026-11-22 03:20:35
 @@ -88,6 +88,26 @@
      def num_experts(self):
          return self.weight.shape[0]

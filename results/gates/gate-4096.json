@@ -1,22 +1,22 @@
 {
- "started": "2026-11-22T02:54:24",
+ "started": "2026-11-22T03:11:57",
  "tag": null,
- "mlx_vlm_file": "~/.exo-inkling-bench/exact-work/stack3/ov/mlx_vlm/__init__.py",
+ "mlx_vlm_file": "~/.exo-inkling-bench/exact-work/stack4/ov/mlx_vlm/__init__.py",
  "env": {
   "MLX_VLM_EXACT_PREFILL_EVAL_EVERY": "1",
   "MLX_MAX_MB_PER_BUFFER": "2"
  },
  "runs": [
   {
-   "ctx": 32768,
+   "ctx": 4096,
    "step": 2048,
    "max_tokens": 256,
-   "elapsed_s": 40.75773612502962,
-   "prompt_tokens": 32750,
-   "prompt_tps": 865.5375872786922,
-   "decode_tps": 44.63384439286259,
-   "gen_tokens": 126,
-   "peak_mlx_GiB": 20.34422415494919,
+   "elapsed_s": 6.79116720892489,
+   "prompt_tokens": 4078,
+   "prompt_tps": 951.7522244278861,
+   "decode_tps": 50.643628704404165,
+   "gen_tokens": 123,
+   "peak_mlx_GiB": 19.460463970899582,
    "needle_found": true,
    "tokens": [
     200001,
@@ -60,20 +60,17 @@
     13,
     68014,
     33175,
-    150367,
+    159942,
+    150816,
+    13,
+    150129,
+    152068,
+    149916,
     175611,
     357,
     6,
     82,
     151697,
-    149881,
-    150816,
-    13,
-    149904,
-    154542,
-    149881,
-    149876,
-    150311,
     25,
     196980,
     865,
@@ -146,11 +143,11 @@
     200010,
     200006
    ],
-   "logprobs_sha256": "c4176a16ddceec6c8f41d278cbcf85cfcf305a05b3caafd4fae4f88401b01a1e",
-   "text_tail": "ote in document. I saw in the text: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>"
+   "logprobs_sha256": "1bbf331d67cb4fe6eeb94670fa3d0f5e2bf535b426839b0b75021780ab583aef",
+   "text_tail": "t. It contains an archivist's note: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>"
   }
  ],
  "active_after_load_GiB": 18.185636527836323,
- "finished": "2026-11-22T02:55:06",
- "note": "stacked.patch (2026-11-22 03:00 CET fold: 0001 + compiled decode v2 + prefill kernels/MoE), recommended env, step 2048"
+ "finished": "2026-11-22T03:12:05",
+ "note": "stacked.patch (2026-11-22 03:20 CET fold: 0001 + compiled decode v3 + prefill kernels/MoE), recommended env, step 2048"
 }

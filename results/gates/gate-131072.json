@@ -1,7 +1,7 @@
 {
- "started": "2026-11-22T02:55:07",
+ "started": "2026-11-22T03:12:50",
  "tag": null,
- "mlx_vlm_file": "~/.exo-inkling-bench/exact-work/stack3/ov/mlx_vlm/__init__.py",
+ "mlx_vlm_file": "~/.exo-inkling-bench/exact-work/stack4/ov/mlx_vlm/__init__.py",
  "env": {
   "MLX_VLM_EXACT_PREFILL_EVAL_EVERY": "1",
   "MLX_MAX_MB_PER_BUFFER": "2"
@@ -11,10 +11,10 @@
    "ctx": 131072,
    "step": 2048,
    "max_tokens": 256,
-   "elapsed_s": 213.7613386248704,
+   "elapsed_s": 213.62440883298405,
    "prompt_tokens": 131054,
-   "prompt_tps": 624.4789724671077,
-   "decode_tps": 34.280053020082235,
+   "prompt_tps": 624.2702170312753,
+   "decode_tps": 35.803540856338415,
    "gen_tokens": 126,
    "peak_mlx_GiB": 23.344979465007782,
    "needle_found": true,
@@ -151,6 +151,6 @@
   }
  ],
  "active_after_load_GiB": 18.185636527836323,
- "finished": "2026-11-22T02:58:42",
- "note": "stacked.patch (2026-11-22 03:00 CET fold: 0001 + compiled decode v2 + prefill kernels/MoE), recommended env, step 2048"
+ "finished": "2026-11-22T03:16:25",
+ "note": "stacked.patch (2026-11-22 03:20 CET fold: 0001 + compiled decode v3 + prefill kernels/MoE), recommended env, step 2048"
 }
