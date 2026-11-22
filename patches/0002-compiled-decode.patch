@@ -1,0 +1,614 @@
+diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py	2026-11-22 00:55:31
++++ b/mlx_vlm/generate/ar.py	2026-11-22 01:29:54
+@@ -397,8 +397,32 @@
+         if hasattr(lm, "_rope_deltas"):
+             lm._rope_deltas = None
+ 
++    compiled_decode = None
++    if (
++        sampler_is_greedy
++        and draft_model is None
++        and kv_bits is None
++        and getattr(model, "model_type", None) in ("inkling2", "inkling2_loop")
++    ):
++        from ..models.inkling2.fast_decode import compiled_decode
++
+     def _step(y, inputs_embeds=None):
+         nonlocal kwargs, last_outputs, target_sample_position
++
++        if (
++            compiled_decode is not None
++            and inputs_embeds is None
++            and not kwargs
++            and not processors
++            and y.shape == (1, 1)
++        ):
++            # Greedy single-token decode as one compiled graph (same values).
++            with mx.stream(generation_stream):
++                served = compiled_decode(model.language_model, y, prompt_cache)
++            if served is not None:
++                target_sample_position += 1
++                y, logprobs = served
++                return y, logprobs.squeeze(0)
+ 
+         step_kwargs = {
+             **kwargs,
+diff -ruN a/mlx_vlm/models/inkling2/fast_decode.py b/mlx_vlm/models/inkling2/fast_decode.py
+--- a/mlx_vlm/models/inkling2/fast_decode.py	1970-01-01 01:00:00
++++ b/mlx_vlm/models/inkling2/fast_decode.py	2026-11-22 01:28:16
+@@ -0,0 +1,205 @@
++"""One compiled graph per single-token decode step (Inkling 2 / 2-loop).
++
++The eager decode step builds ~13k lazy nodes in Python (~5 ms) and encodes
++~7k kernels per token. Compiling the whole step removes the Python graph build
++and fuses the elementwise glue into fewer kernels. The step reads functional
++views of the caches (step_cache.py), so its shapes are constant and its trace is
++reused for every token; the caches' Python objects are updated afterwards.
++
++The step runs the model's own decode code on the same inputs, so it performs
++the same operations in the same order; it is used only where the eager path
++would take the same branches: every global cache already holds at least
++_DECODE_KERNEL_MIN_KEYS - 1 keys and has room for one more, and every sliding
++ring is full.
++"""
++
++import os
++
++import mlx.core as mx
++
++from ..cache import ArraysCache, CacheList, KVCache, RotatingKVCache
++from .step_cache import StepConvCache, StepKVCache, StepRotatingKVCache
++
++_ENABLED = os.environ.get("MLX_VLM_INKLING2_COMPILED_DECODE", "1") == "1"
++_PREP = set(
++    os.environ.get("MLX_VLM_INKLING2_DECODE_PREP", "precast,factor,catproj").split(",")
++)
++_FUSED = ("q_proj", "r_proj", "gate_proj", "k_proj", "v_proj")
++_MESSAGE_GATES = ("q_message_gate", "k_message_gate", "v_message_gate", "mlp_message_gate")
++
++
++def prepare_decode(lm):
++    """One-time weight layout for decode. Changes no value that is computed:
++    - FP32 copies of the router and loop-gate weights that every step casts
++      to FP32 anyway (the casts become no-ops);
++    - the NVFP4 experts' per-expert kernel factor, stored once;
++    - the same-input attention projections stored as one row-wise
++      concatenation, each projection's weight a view of its rows (memory is
++      unchanged; Attention._decode_projections reads them in one GEMV)."""
++    import mlx.nn as nn
++
++    if lm.__dict__.get("_decode_prepared"):
++        return
++    lm.__dict__["_decode_prepared"] = True
++    for layer in lm.model.layers:
++        attn, moe = layer.self_attn, layer.mlp
++        new = []
++        if "precast" in _PREP:
++            if moe.gate_weight.dtype != mx.float32:
++                moe.gate_weight = moe.gate_weight.astype(mx.float32)
++                new.append(moe.gate_weight)
++            for name in _MESSAGE_GATES:
++                gate = getattr(layer, name, None)
++                if gate is None:
++                    continue
++                for proj in (gate.forget_gate_proj, gate.message_gate_proj):
++                    if proj.weight.dtype != mx.float32:
++                        proj.weight = proj.weight.astype(mx.float32)
++                        new.append(proj.weight)
++        if "factor" in _PREP:
++            for name in ("gate_proj", "up_proj", "down_proj"):
++                proj = getattr(moe.switch_mlp, name)
++                if hasattr(proj, "decode_factor"):
++                    proj.decode_factor()
++        if (
++            "catproj" in _PREP
++            and attn.sharding_group is None
++            and attn.__dict__.get("_fused_qrgkv") is None
++            and all(
++                type(attn[n]) is nn.Linear and "bias" not in attn[n] for n in _FUSED
++            )
++        ):
++            weights = [attn[n].weight for n in _FUSED]
++            if len({(w.dtype, w.shape[1]) for w in weights}) == 1:
++                fused = mx.concatenate(weights, axis=0)
++                mx.eval(fused)
++                start = 0
++                for n, w in zip(_FUSED, weights):
++                    attn[n].weight = fused[start : start + w.shape[0]]
++                    new.append(attn[n].weight)
++                    start += w.shape[0]
++                attn.__dict__["_fused_qrgkv"] = fused
++                del weights
++        mx.eval(new)
++    mx.clear_cache()
++
++
++def _layout(cache):
++    """(kind, ...) per cache entry, or None if the compiled step can't serve it."""
++    from .language import _DECODE_KERNEL_MIN_KEYS
++
++    kinds, offset, idx = [], None, None
++    for entry in cache:
++        if type(entry) is not CacheList or len(entry.caches) != 2:
++            return None
++        kv, conv = entry.caches
++        if type(conv) is not ArraysCache or any(
++            getattr(conv, a, None) is not None for a in ("left_padding", "lengths")
++        ):
++            return None
++        if getattr(conv, "_speculation", None) is not None or any(
++            s is None for s in conv.cache
++        ):
++            return None
++        if type(kv) is KVCache:
++            if kv.keys is None or kv.offset + 1 > kv.keys.shape[2]:
++                return None
++            if kv.offset + 1 < _DECODE_KERNEL_MIN_KEYS:
++                return None
++            if offset is None:
++                offset = kv.offset
++            elif kv.offset != offset:
++                return None
++            kinds.append("g")
++        elif type(kv) is RotatingKVCache:
++            if (
++                kv.keys is None
++                or kv.keep != 0
++                or kv.offset < kv.max_size
++                or kv.keys.shape[2] != kv.max_size
++            ):
++                return None
++            if idx is None:
++                idx = kv._idx
++            elif kv._idx != idx:
++                return None
++            kinds.append("r")
++        else:
++            return None
++    if offset is None or idx is None:
++        return None
++    return tuple(kinds), offset, idx
++
++
++class CompiledDecoder:
++    def __init__(self, lm):
++        self.lm = lm
++        self.kinds = None
++        prepare_decode(lm)
++        self.fn = mx.compile(self._step)
++
++    def _step(self, token, offset, idx, *states):
++        caches, n = [], 0
++        for kind in self.kinds:
++            k, v, c0, c1, c2, c3 = states[n : n + 6]
++            n += 6
++            if kind == "g":
++                kv = StepKVCache(k, v, offset)
++            else:
++                kv = StepRotatingKVCache(k, v, idx, k.shape[2])
++            caches.append((kv, StepConvCache((c0, c1, c2, c3))))
++        out = self.lm(token, cache=caches, logits_to_keep=1)
++        logits = out.logits[:, -1, :]
++        logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
++        y = mx.argmax(logprobs, axis=-1)
++        new = []
++        for kv, conv in caches:
++            new += [kv.keys, kv.values, *conv.cache]
++        return (y, logprobs, *new)
++
++    def __call__(self, token, cache):
++        """(y, logprobs) for one token, updating `cache`; None if not served."""
++        layout = _layout(cache)
++        if layout is None:
++            return None
++        kinds, offset, idx = layout
++        if self.kinds is None:
++            self.kinds = kinds
++        elif self.kinds != kinds:
++            return None
++        states = []
++        for entry in cache:
++            kv, conv = entry.caches
++            states += [kv.keys, kv.values, *conv.cache]
++            # Drop the cache's references so the in-place updates can donate
++            # the old buffers instead of copying them.
++            kv.keys = kv.values = None
++        outs = self.fn(
++            token,
++            mx.array(offset, dtype=mx.int32),
++            mx.array(idx, dtype=mx.int32),
++            *states,
++        )
++        del states
++        y, logprobs, new = outs[0], outs[1], outs[2:]
++        for i, entry in enumerate(cache):
++            kv, conv = entry.caches
++            k, v, *cs = new[6 * i : 6 * i + 6]
++            kv.keys, kv.values = k, v
++            kv.offset += 1
++            if type(kv) is RotatingKVCache:
++                kv._idx = (0 if kv._idx == kv.max_size else kv._idx) + 1
++            for j, s in enumerate(cs):
++                conv.cache[j] = s
++        return y, logprobs
++
++
++def compiled_decode(lm, token, cache):
++    """Serve one greedy decode step through the compiled graph, or None."""
++    if not _ENABLED:
++        return None
++    dec = lm.__dict__.get("_compiled_decoder")
++    if dec is None:
++        dec = CompiledDecoder(lm)
++        lm.__dict__["_compiled_decoder"] = dec
++    return dec(token, cache)
+diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
+--- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 00:55:31
++++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 01:13:45
+@@ -252,12 +252,15 @@
+     )
+ 
+ 
+-def decode_attention(q, k, v, rel, sinks, *, scale, key_start=None):
++def decode_attention(q, k, v, rel, sinks, *, scale, key_start=None, length=None):
+     """One query of one sequence over a chronological cache.
+ 
+     q: (1, HQ, 1, D); k, v: (1, HKV, S, D) with the query at the last key;
+     rel: (HQ, R), the bias at backward distances below R; sinks: (HQ,);
+     key_start: optional (1,) int array, the first valid key (left padding).
++    length: optional (,) int array, the number of valid keys when k and v are
++    a larger reserved buffer (the query is then key length - 1). Blocks past
++    it hold no keys and add exact zeros in the combine.
+     Returns (1, HQ, 1, D) in q's dtype.
+     """
+     _, hq, _, d = q.shape
+@@ -265,6 +268,11 @@
+     nblocks = (s + _DECODE_BLOCK - 1) // _DECODE_BLOCK
+     if key_start is None:
+         key_start = mx.zeros((1,), mx.int32)
++    sizes = (
++        mx.array([s], dtype=mx.int32)
++        if length is None
++        else length.reshape(1).astype(mx.int32)
++    )
+     common = [("T", q.dtype), ("D", d), ("HQ", hq), ("HKV", hkv)]
+     part_max, part_sum, part_acc = _decode_partials()(
+         inputs=[
+@@ -273,7 +281,7 @@
+             v,
+             mx.contiguous(rel),
+             key_start.astype(mx.int32),
+-            mx.array([s], dtype=mx.int32),
++            sizes,
+             mx.array(scale, dtype=mx.float32),
+         ],
+         template=[*common, ("REL", rel.shape[-1]), ("BS", _DECODE_BLOCK),
+diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/language.py
+--- a/mlx_vlm/models/inkling2/language.py	2026-11-22 00:55:31
++++ b/mlx_vlm/models/inkling2/language.py	2026-11-22 01:27:43
+@@ -37,15 +37,40 @@
+ )
+ from ..switch_layers import SwitchGLU
+ from .config import TextConfig, validate_sharding
++from .step_cache import StepKVCache, StepRotatingKVCache
+ 
+ 
+ # Global-cache length from which single-query decode uses the split-K kernel.
+ _DECODE_KERNEL_MIN_KEYS = 4096
+ # Caches whose single-query decode takes the fused path (the server's batch
+-# caches hold one row when it serves one sequence).
+-_DECODE_CACHES = (KVCache, RotatingKVCache, BatchKVCache, BatchRotatingKVCache)
++# caches hold one row when it serves one sequence; the step caches are the
++# compiled decode step's views, see fast_decode.py).
++_DECODE_CACHES = (
++    KVCache,
++    RotatingKVCache,
++    BatchKVCache,
++    BatchRotatingKVCache,
++    StepKVCache,
++    StepRotatingKVCache,
++)
+ 
+ 
++_ARANGES = {}
++
++
++def _const_arange(n):
++    """mx.arange(n) as a stored constant for the decode shapes (1 query, the
++    1024-key sliding ring), so a decode step does not recompute it."""
++    a = _ARANGES.get(n)
++    if a is None:
++        if n > 1024 or len(_ARANGES) >= 16:
++            return mx.arange(n)
++        import numpy as np
++
++        a = _ARANGES[n] = mx.array(np.arange(n, dtype=np.int32))
++    return a
++
++
+ @mx.compile
+ def l2_clip(x, threshold, scale=None):
+     dtype = x.dtype
+@@ -382,14 +407,45 @@
+         weight = mx.pad(projection.weight, ((start, width - start), (0, 0)))
+         return (x @ weight.T)[..., start : start + width]
+ 
++    def _decode_projections(self, x, key_input, value_input):
++        """One token's same-input projections as one GEMV over their row-wise
++        concatenated weights (fast_decode.prepare_decode keeps each projection's
++        weight as a view of it). Every output row is the same dot product of the
++        same row and input, computed by the same GEMV kernel."""
++        fused = self.__dict__.get("_fused_qrgkv")
++        if (
++            fused is None
++            or self.sharding_group is not None
++            or x.shape[0] * x.shape[1] != 1
++        ):
++            return None
++        widths = [
++            self[n].weight.shape[0] for n in ("q_proj", "r_proj", "gate_proj", "k_proj")
++        ]
++        cuts = [sum(widths[: i + 1]) for i in range(4)]
++        if key_input is x and value_input is x:
++            q, r, g, k, v = mx.split(x @ fused.T, cuts, axis=-1)
++        else:
++            q, r, g = mx.split(x @ fused[: cuts[2]].T, cuts[:2], axis=-1)
++            k = self.k_proj(key_input)
++            v = self.v_proj(value_input)
++        return q, k, v, r, g
++
+     def __call__(self, x, key_input=None, value_input=None, cache=None, conv_mask=None):
+         b, length, _ = x.shape
+         cfg = self.config
+         kv, conv = cache if cache is not None else (None, None)
+         key_input = x if key_input is None else key_input
+         value_input = x if value_input is None else value_input
+-        k = self._project(self.k_proj, key_input)
+-        v = self._project(self.v_proj, value_input)
++        fused = self._decode_projections(x, key_input, value_input)
++        if fused is None:
++            k = self._project(self.k_proj, key_input)
++            v = self._project(self.v_proj, value_input)
++            q_rows = self._project(self.q_proj, x)
++            r_rows = self._project(self.r_proj, x)
++            gate_rows = None
++        else:
++            q_rows, k, v, r_rows, gate_rows = fused
+         if self.is_sliding:
+             k = self.k_sconv(k, conv, conv_mask)
+             v = self.v_sconv(v, conv, conv_mask)
+@@ -397,9 +453,7 @@
+             k = self.k_sconv(k, key_input, conv, conv_mask)
+             v = self.v_sconv(v, value_input, conv, conv_mask)
+         q = l2_clip(
+-            self._project(self.q_proj, x).reshape(
+-                b, length, self.n_heads, self.head_dim
+-            ),
++            q_rows.reshape(b, length, self.n_heads, self.head_dim),
+             cfg.qk_l2_clip_threshold,
+             self.q_scale,
+         )
+@@ -412,13 +466,15 @@
+                 x.dtype
+             )
+         r = l2_clip(
+-            self._project(self.r_proj, x).reshape(b, length, self.n_heads, cfg.d_rel),
++            r_rows.reshape(b, length, self.n_heads, cfg.d_rel),
+             cfg.rel_l2_clip_threshold,
+             self.rel_scale,
+         )
+         if not self.is_sliding and cfg.log_scaling_n_floor is not None:
+             offset = kv.offset if kv is not None else 0
+-            positions = mx.arange(length) + mx.array(offset)[..., None] + 1
++            positions = (
++                _const_arange(length) if length == 1 else mx.arange(length)
++            ) + mx.array(offset)[..., None] + 1
+             tau = 1 + cfg.log_scaling_alpha * mx.log(
+                 mx.maximum(positions / cfg.log_scaling_n_floor, 1)
+             )
+@@ -434,9 +490,10 @@
+         else:
+             out = self._masked_attention(x, q, k, v, r, kv)
+         out = out.transpose(0, 2, 1, 3).reshape(b, length, -1)
++        if gate_rows is None:
++            gate_rows = self._project(self.gate_proj, x)
+         out = (
+-            out.astype(mx.float32)
+-            * mx.sigmoid(self._project(self.gate_proj, x).astype(mx.float32))
++            out.astype(mx.float32) * mx.sigmoid(gate_rows.astype(mx.float32))
+         ).astype(x.dtype)
+         # Every output dot still consumes all heads on one rank. Gather the
+         # heads first, project complete output rows, then restore hidden order.
+@@ -453,6 +510,9 @@
+         rotating = isinstance(kv, (RotatingKVCache, BatchRotatingKVCache))
+         k, v = kv.update_and_fetch(k, v)
+         size = k.shape[2]
++        # A compiled step reads a reserved buffer whole; its true length (at
++        # least _DECODE_KERNEL_MIN_KEYS, see fast_decode.py) is an array.
++        length = getattr(kv, "length", None)
+         rel = r[0, 0] @ self.rel_proj.astype(x.dtype)
+         sinks = self.sink_proj(x)[0, 0]
+         if self.sharding_group is not None:
+@@ -461,7 +521,7 @@
+         start = kv.left_padding[:1] if batched else None
+         if (
+             not rotating
+-            and size >= _DECODE_KERNEL_MIN_KEYS
++            and (size >= _DECODE_KERNEL_MIN_KEYS or length is not None)
+             and q.dtype == k.dtype == v.dtype == mx.bfloat16
+             and self.head_dim % 32 == 0
+             and mx.metal.is_available()
+@@ -479,8 +539,9 @@
+                 sinks,
+                 scale=self.head_dim**-0.5,
+                 key_start=None if start is None else mx.maximum(start, 0),
++                length=length,
+             )
+-        slots = mx.arange(size)
++        slots = _const_arange(size)
+         if rotating:
+             # After an in-place decode write the oldest key sits at the write index.
+             slots = (slots - kv._idx) % size
+diff -ruN a/mlx_vlm/models/inkling2/step_cache.py b/mlx_vlm/models/inkling2/step_cache.py
+--- a/mlx_vlm/models/inkling2/step_cache.py	1970-01-01 01:00:00
++++ b/mlx_vlm/models/inkling2/step_cache.py	2026-11-22 01:13:24
+@@ -0,0 +1,69 @@
++"""Functional views of Inkling 2 decode caches for a compiled decode step.
++
++Inside one `mx.compile` graph per decode step every step-varying quantity is an
++array: the global caches are written into their reserved buffers at an array
++offset and read whole with the true length as an array; the full sliding rings
++are written at an array index. Shapes therefore stay constant across steps and
++the trace is reused. The arithmetic is the eager decode path's: the same
++offsets, slots, biases and kernels (see Attention._decode_attention).
++"""
++
++import mlx.core as mx
++
++from ..cache import KVCache, RotatingKVCache
++
++
++class StepKVCache(KVCache):
++    """A reserved global cache: keys/values hold capacity >= offset + 1."""
++
++    def __init__(self, keys, values, offset):
++        self.keys, self.values = keys, values
++        self.offset = offset  # (,) int32: keys before this token
++        self.length = None
++
++    def update_and_fetch(self, keys, values):
++        start = self.offset.reshape(1)
++        self.keys = mx.slice_update(self.keys, keys, start, axes=(2,))
++        self.values = mx.slice_update(self.values, values, start, axes=(2,))
++        self.length = self.offset + 1
++        return self.keys, self.values
++
++
++class StepRotatingKVCache(RotatingKVCache):
++    """A full sliding ring (keep=0); `_idx` is the next write slot (array)."""
++
++    def __init__(self, keys, values, idx, max_size):
++        self.keys, self.values = keys, values
++        self._idx = idx
++        self.max_size = max_size
++        self.keep = 0
++        self.offset = max_size
++
++    def update_and_fetch(self, keys, values):
++        # RotatingKVCache._update_in_place on a full ring: wrap, write, advance.
++        slot = mx.where(self._idx == self.max_size, 0, self._idx)
++        start = slot.reshape(1)
++        self.keys = mx.slice_update(self.keys, keys, start, axes=(2,))
++        self.values = mx.slice_update(self.values, values, start, axes=(2,))
++        self._idx = slot + 1
++        return self.keys, self.values
++
++
++class StepConvCache:
++    """The four short-convolution states of one layer visit (no padding)."""
++
++    left_padding = None
++    lengths = None
++    is_speculating = False
++
++    def __init__(self, states):
++        self.cache = list(states)
++
++    def __getitem__(self, idx):
++        return self.cache[idx]
++
++    def __setitem__(self, idx, value):
++        self.cache[idx] = value
++
++    def advance(self, n):
++        pass
+diff -ruN a/mlx_vlm/models/switch_layers.py b/mlx_vlm/models/switch_layers.py
+--- a/mlx_vlm/models/switch_layers.py	2026-11-22 00:55:31
++++ b/mlx_vlm/models/switch_layers.py	2026-11-22 01:27:58
+@@ -83,6 +83,22 @@
+             weights[f"{target}.{suffix}"] = weights.pop(key)
+ 
+ 
++_LHS_INDICES = {}
++
++
++def default_lhs_indices(x):
++    """gather_qmm's default lhs indices (arange over x's batch dims) as a
++    stored constant for decode-sized batches, None (the default) otherwise."""
++    shape = tuple(x.shape[:-2])
++    n = math.prod(shape)
++    if n > 64:
++        return None
++    a = _LHS_INDICES.get(shape)
++    if a is None:
++        a = _LHS_INDICES[shape] = mx.array(np.arange(n, dtype=np.uint32).reshape(shape))
++    return a
++
++
+ def _gather_sort(x, indices):
+     *_, M = indices.shape
+     indices = indices.flatten()
+@@ -151,6 +167,7 @@
+             self["weight"],
+             self["scales"],
+             self.get("biases"),
++            lhs_indices=default_lhs_indices(x),
+             rhs_indices=indices,
+             transpose=True,
+             group_size=self.group_size,
+diff -ruN a/mlx_vlm/quantization/nvfp4.py b/mlx_vlm/quantization/nvfp4.py
+--- a/mlx_vlm/quantization/nvfp4.py	2026-11-22 00:55:31
++++ b/mlx_vlm/quantization/nvfp4.py	2026-11-22 01:27:53
+@@ -88,6 +88,26 @@
+     def num_experts(self):
+         return self.weight.shape[0]
+ 
++    def _kernel_factor(self, scale):
++        scale = scale.astype(mx.float32)
++        factor = (
++            2688.0 / scale
++            if self._scale_name == "weight_global_scale"
++            else 2688.0 * scale
++        )
++        return mx.broadcast_to(factor.reshape(-1), (self.num_experts,))
++
++    def decode_factor(self):
++        """The kernel's per-expert factor computed once and stored, so a
++        decode step reads it instead of recomputing it (same values)."""
++        scale = self.global_scale
++        cached = self.__dict__.get("_factor_cache")
++        if cached is None or cached[0] is not scale:
++            factor = mx.contiguous(self._kernel_factor(scale))
++            mx.eval(factor)
++            cached = self.__dict__["_factor_cache"] = (scale, factor)
++        return cached[1]
++
+     def __call__(self, x, indices, sorted_indices=False):
+         scale = self.global_scale
+         if (
+@@ -97,17 +117,19 @@
+         ):
+             # The GPU kernel accepts one tensor absmax per expert. Keep its
+             # scaling inside the projection before rounding to the input dtype.
+-            scale = scale.astype(mx.float32)
++            cached = self.__dict__.get("_factor_cache")
+             factor = (
+-                2688.0 / scale
+-                if self._scale_name == "weight_global_scale"
+-                else 2688.0 * scale
++                cached[1]
++                if cached is not None and cached[0] is scale
++                else self._kernel_factor(scale)
+             )
+-            factor = mx.broadcast_to(factor.reshape(-1), (self.num_experts,))
++            from ..models.switch_layers import default_lhs_indices
++
+             output = mx.gather_qmm(
+                 x,
+                 self.weight,
+                 self.scales,
++                lhs_indices=default_lhs_indices(x),
+                 rhs_indices=indices,
+                 transpose=True,
+                 group_size=self.group_size,

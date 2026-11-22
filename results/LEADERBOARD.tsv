@@ -1,0 +1,122 @@
+track	variant	metric	value	pct_roofline	exact	time
+base	fork-55ca2e9e	e2e32k_prefill_tok_s	849.0		y	2026-11-22 00:38 CET
+base	fork-55ca2e9e	e2e32k_decode_tok_s	34.67		y	2026-11-22 00:38 CET
+mine	mem-patch+evalevery1+mb2	prefill_working_GiB_step512_S262k	1.044		y	2026-11-22 00:52 CET
+A	base-attn-S4096-T64-smoke	attention-tflops	3.40584	23.9848	y	2026-11-22 00:59:37 CET
+A	base-attn-S32768-T512-short	attention-tflops	9.85184	69.3792	y	2026-11-22 00:59:37 CET
+A	base-attn-S32768-T512	attention-tflops	9.86545	69.4750	y	2026-11-22 00:59:37 CET
+mine	mem-patch-full	e2e32k_prefill_tok_s_step2048	864.5		y	2026-11-22 01:00:00 CET
+mine	mem-patch-full	e2e32k_peak_GiB_step2048	22.19		y-bitexact	2026-11-22 01:00:00 CET
+mine	mem-patch-ops4	probe_1M_peak_GiB_step512	51.14		n/a-synthetic	2026-11-22 01:00:00 CET
+A	base-attn-S32768-T1024	attention-tflops	10.31184	72.6186	y	2026-11-22 01:00:16 CET
+A	base-attn-S32768-T2048	attention-tflops	10.74761	75.6874	y	2026-11-22 01:00:16 CET
+A	base-attn-S131072-T512	attention-tflops	9.66397	68.0561	y	2026-11-22 01:01:04 CET
+A	base-attn-S131072-T1024	attention-tflops	9.99271	70.3712	y	2026-11-22 01:01:04 CET
+A	base-attn-S131072-T2048	attention-tflops	10.34761	72.8705	y	2026-11-22 01:01:04 CET
+A	base-attn-S524288-T512	attention-tflops	9.66432	68.0586	y	2026-11-22 01:05:34 CET
+A	base-attn-S524288-T1024	attention-tflops	10.01931	70.5585	y	2026-11-22 01:08:57 CET
+A	base-attn-S524288-T2048	attention-tflops	10.27216	72.3392	y	2026-11-22 01:09:22 CET
+A	gqa-bq16-bk16-global-random	max_abs_diff	0	100	y	2026-11-22 01:09:40 CET
+A	gqa-bq16-bk16-swa-random	max_abs_diff	0	100	y	2026-11-22 01:09:40 CET
+A	gqa-bq8-bk16-S32768-T512	attention-tflops	8.93360	62.9127	n	2026-11-22 01:10:32 CET
+A	gqa-bq16-bk16-S32768-T512	attention-tflops	8.80978	62.0407	y	2026-11-22 01:10:32 CET
+A	gqa-bq24-bk16-S32768-T512	attention-tflops	7.86309	55.3739	n	2026-11-22 01:10:32 CET
+A	gqa-bq32-bk16-S32768-T512	attention-tflops	7.43415	52.3532	n	2026-11-22 01:10:32 CET
+A	single-bq64-bk16-global-random	max_abs_diff	0	100	y	2026-11-22 01:12:43 CET
+A	single-bq16-bk16-S32768-T512	attention-tflops	8.35006	58.8032	n	2026-11-22 01:12:43 CET
+A	single-bq32-bk16-S32768-T512	attention-tflops	9.86060	69.4408	y	2026-11-22 01:12:43 CET
+A	single-bq48-bk16-S32768-T512	attention-tflops	8.24687	58.0766	n	2026-11-22 01:12:43 CET
+A	single-bq64-bk16-S32768-T512	attention-tflops	10.18198	71.7041	y	2026-11-22 01:12:43 CET
+A	single-bq96-bk16-S32768-T512	attention-tflops	7.39770	52.0965	n	2026-11-22 01:12:43 CET
+A	single-bq128-bk16-S32768-T512	attention-tflops	7.87891	55.4853	n	2026-11-22 01:12:43 CET
+A	single-bq64-bk32-global-random	max_abs_diff	0.00012207	0	n	2026-11-22 01:13:20 CET
+A	single-bq32-bk32-S32768-T512	attention-tflops	9.35363	65.8706	n	2026-11-22 01:13:20 CET
+A	single-bq64-bk32-S32768-T512	attention-tflops	9.85473	69.3995	n	2026-11-22 01:13:20 CET
+A	single-bq64-bk8-global-random	max_abs_diff	0.00012207	0	n	2026-11-22 01:13:58 CET
+A	single-bq32-bk8-S32768-T512	attention-tflops	9.42318	66.3604	n	2026-11-22 01:13:58 CET
+A	single-bq64-bk8-S32768-T512	attention-tflops	9.06776	63.8575	n	2026-11-22 01:13:58 CET
+A	bq64-fastmask-global-random	max_abs_diff	0	100	y	2026-11-22 01:22:26 CET
+A	bq64-fastmask-swa-bug	max_abs_diff	0.0050993	0	n	2026-11-22 01:22:26 CET
+A	bq64-fastmask-S32768-T512	attention-tflops	10.28294	72.4150	y	2026-11-22 01:22:26 CET
+B	compiled-step	decode_ms_per_tok_S32k_synth	25.87	47.7	y	2026-11-22 01:22:50 CET
+B	compiled-step	decode_ms_per_tok_S131k_synth	33.09	55.1	y	2026-11-22 01:22:50 CET
+B	base-eager	decode_ms_per_tok_S32k_synth	29.78	41.4	y	2026-11-22 01:22:50 CET
+A	bq64-fastmask-swa-fixed-random	max_abs_diff	0	100	y	2026-11-22 01:23:23 CET
+A	bq32-fastmask-S32768-T512	attention-tflops	10.12094	71.2742	y	2026-11-22 01:23:23 CET
+A	bq64-fastmask-fixed-S32768-T512	attention-tflops	10.28730	72.4458	y	2026-11-22 01:23:23 CET
+A	bq64-slowmask-S32768-T512	attention-tflops	10.19328	71.7837	y	2026-11-22 01:23:23 CET
+A	bq64-pad0-S32768-T512	attention-tflops	10.03018	70.6351	y	2026-11-22 01:24:15 CET
+A	bq64-pad4-S32768-T512	attention-tflops	10.25830	72.2416	y	2026-11-22 01:24:15 CET
+A	bq64-pad8-S32768-T512	attention-tflops	10.28506	72.4300	y	2026-11-22 01:24:15 CET
+A	bq64-pad16-S32768-T512	attention-tflops	9.64065	67.8919	y	2026-11-22 01:24:15 CET
+A	exact-bq64-S32768-T1024	attention-tflops	10.72361	75.5184	y	2026-11-22 01:25:38 CET
+A	exact-bq64-S32768-T2048	attention-tflops	10.91704	76.8806	y	2026-11-22 01:27:34 CET
+A	exact-bq64-S131072-T512	attention-tflops	10.40232	73.2558	y	2026-11-22 01:27:34 CET
+A	exact-bq64-S131072-T1024	attention-tflops	10.67797	75.1969	y	2026-11-22 01:27:34 CET
+A	exact-bq64-S131072-T2048	attention-tflops	10.86744	76.5312	y	2026-11-22 01:27:34 CET
+A	exact-bq64-S524288-T512	attention-tflops	10.35080	72.8930	y	2026-11-22 01:28:24 CET
+A	exact-bq64-S524288-T1024	attention-tflops	10.65648	75.0456	y	2026-11-22 01:28:24 CET
+A	exact-bq64-S524288-T2048	attention-tflops	10.83436	76.2983	y	2026-11-22 01:28:24 CET
+verify	B-compiled-step	decode_ms_per_tok_S32k_synth	25.50	48.4	micro-unchecked	2026-11-22 01:28:59 CET
+verify	B-compiled-step	decode_ms_per_tok_S131k_synth	32.91	55.4	micro-unchecked	2026-11-22 01:28:59 CET
+verify	A-bq64-fastmask	attention-tflops_S32k_T512	10.330	72.7	y-e2e32k-bitexact	2026-11-22 01:28:59 CET
+verify	A-bq64-fastmask	attention-tflops_S131k_T2048	10.875	76.6	y-e2e32k-bitexact	2026-11-22 01:28:59 CET
+verify	mempatch0001	e2e131k_tokens+logprobs_sha_equal	1		y-bitexact	2026-11-22 01:28:59 CET
+A	base-swa-T512	attention-tflops	6.95855	49.0038	y	2026-11-22 01:30:24 CET
+A	bq64-swa-T512	attention-tflops	6.61910	46.6134	y	2026-11-22 01:30:24 CET
+A	base-swa-T1024	attention-tflops	8.22200	57.9014	y	2026-11-22 01:30:24 CET
+A	bq64-swa-T1024	attention-tflops	7.69947	54.2216	y	2026-11-22 01:30:24 CET
+A	base-swa-T2048	attention-tflops	9.25806	65.1976	y	2026-11-22 01:30:24 CET
+A	bq64-swa-T2048	attention-tflops	8.48854	59.7785	y	2026-11-22 01:30:24 CET
+A	bq32-swa-slowmask-T512	attention-tflops	7.00330	49.3190	y	2026-11-22 01:30:24 CET
+A	bq32-swa-fastmask-T512	attention-tflops	6.80211	47.9022	y	2026-11-22 01:30:24 CET
+B	compiled-step+prep	e2e32k_decode_tok_s	40.15		y	2026-11-22 01:31:18 CET
+B	compiled-step+prep	e2e32k_sha_equal	1		y	2026-11-22 01:31:18 CET
+A	final-default-global-random	max_abs_diff	0	100	y	2026-11-22 01:31:27 CET
+A	final-default-swa-random	max_abs_diff	0	100	y	2026-11-22 01:31:27 CET
+A	exact-bq64-fastmask	e2e32k_prefill_tok_s	870.5700	67.135	y	2026-11-22 01:31:55 CET
+A	exact-bq64-fastmask	e2e32k_decode_tok_s	32.8948		y	2026-11-22 01:31:55 CET
+A	exact-bq64-fastmask-roofline	e2e32k_prefill_tok_s	870.5700	67.1083	y	2026-11-22 01:32:00 CET
+A	exact-bq64-fastmask	e2e131k_prefill_tok_s	627.3649	70.424	y	2026-11-22 01:35:57 CET
+A	exact-bq64-fastmask	e2e131k_decode_tok_s	27.7424		y	2026-11-22 01:35:57 CET
+A	exact-bq64-fastmask-roofline	e2e131k_prefill_tok_s	627.3649	69.7340	y	2026-11-22 01:36:00 CET
+A	bf16-copy	bandwidth_GB_s	433.3572	79.3694	y	2026-11-22 01:41:14 CET
+A	moe-inverse-argsort	median_ms	0.158917		y	2026-11-22 01:41:14 CET
+A	moe-inverse-scatter	median_ms	0.112917		y	2026-11-22 01:41:14 CET
+A	final2-global-random	max_abs_diff	0	100	y	2026-11-22 01:41:36 CET
+A	final2-swa-random	max_abs_diff	0	100	y	2026-11-22 01:41:36 CET
+A	final2-S131072-T512	attention-tflops	10.40728	73.2907	y	2026-11-22 01:41:36 CET
+A	math-relaxed-random	max_abs_diff	0.00012207	0	n	2026-11-22 01:42:09 CET
+A	math-relaxed-S131072-T512	attention-tflops	10.42233	73.3967	n	2026-11-22 01:42:09 CET
+A	math-fast-random	max_abs_diff	0.00012207	0	n	2026-11-22 01:42:09 CET
+A	math-fast-S131072-T512	attention-tflops	10.40935	73.3053	n	2026-11-22 01:42:09 CET
+A	final-attn-moe	e2e32k_prefill_tok_s	871.0872	67.1482	y	2026-11-22 01:43:09 CET
+A	final-attn-moe	e2e32k_decode_tok_s	33.4825		y	2026-11-22 01:43:09 CET
+A	final-step4096	e2e32k_prefill_tok_s	875.7491	67.5076	n	2026-11-22 01:45:57 CET
+A	op-q-mxfp8	tflops	13.65984	96.1961	y	2026-11-22 02:01:10 CET
+A	op-k-mxfp8	tflops	11.73696	82.6546	y	2026-11-22 02:01:10 CET
+A	op-v-mxfp8	tflops	11.84033	83.3826	y	2026-11-22 02:01:10 CET
+A	op-r-mxfp8	tflops	8.91301	62.7677	y	2026-11-22 02:01:10 CET
+A	op-gate-mxfp8	tflops	13.65917	96.1913	y	2026-11-22 02:01:10 CET
+A	op-o-mxfp8	tflops	13.64310	96.0782	y	2026-11-22 02:01:10 CET
+A	op-router	tflops	4.08612	28.7755	y	2026-11-22 02:01:10 CET
+A	op-switchglu-nvfp4	tflops	11.69740	82.3761	y	2026-11-22 02:01:10 CET
+A	op-sparse-moe-total	tflops	11.20025	78.8750	y	2026-11-22 02:01:10 CET
+A	op-message-gate	tflops	2.01131	14.1642	y	2026-11-22 02:01:10 CET
+A	full-sliding-layer-depth0	tflops	11.10002	78.1691	y	2026-11-22 02:01:10 CET
+A	full-chunk-depth0	tflops	9.44113	66.4868	y	2026-11-22 02:01:10 CET
+A	moe-split-real	tflops	11.21848	79.0034	y	2026-11-22 02:06:01 CET
+A	moe-fused-interleaved-real	tflops	11.23017	79.0857	y	2026-11-22 02:06:01 CET
+A	message-gate-split	tflops	1.67971	11.8290	y	2026-11-22 02:07:18 CET
+A	message-gate-fused-output	tflops	1.71504	12.0777	y	2026-11-22 02:07:18 CET
+A	message-gate-fused-compiled	tflops	2.06056	14.5109	y	2026-11-22 02:08:24 CET
+A	full-chunk-split-gates	tok_s	1007.9632	66.4868	y	2026-11-22 02:09:12 CET
+A	full-chunk-fused-compiled-gates	tok_s	1014.2251	66.8999	y	2026-11-22 02:09:12 CET
+A	attn+scatter+compiled-gates	e2e32k_prefill_tok_s	876.6577	67.5775	y	2026-11-22 02:10:05 CET
+A	attn+scatter+compiled-gates	e2e32k_decode_tok_s	34.3228		y	2026-11-22 02:10:05 CET
+B	compiled+prep+gatestack+convstep+prefetchK	decode_ms_per_tok_S32k_synth	24.51	50.4	y	2026-11-22 02:11:37 CET
+B	compiled+prep+gatestack+convstep+prefetchK	decode_ms_per_tok_S131k_synth	31.66	57.6	y	2026-11-22 02:11:37 CET
+B	splitK-prefetch	global_attn_us_S131k_per_visit	1194.6	82.3	y	2026-11-22 02:11:37 CET
+A	moe-fused-unsort-combine	moe_ms	23.3442	78.88	y	2026-11-22 02:13:20 CET
+A	full-chunk-eval-sync	tok_s	1014.5279	66.92	y	2026-11-22 02:14:29 CET
+A	full-chunk-eval-async	tok_s	1022.5122	67.45	y	2026-11-22 02:14:54 CET

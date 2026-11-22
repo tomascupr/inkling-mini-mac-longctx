@@ -1,0 +1,355 @@
+{
+ "title": "Inkling 2 Mini on Studio 1 — betizzel/mlx-vlm m5pro-inkling2 through 262k (524k killed mid-prefill)",
+ "status": "complete-through-262k-524k-killed",
+ "date": "2026-11-21/22",
+ "tz": "Europe/Prague",
+ "measured": "2026-11-21 23:36 CET through 2026-11-21 23:58 CET (32k, 131k, 262k); 524k started 2026-11-22 00:11:52 CET and was killed 2026-11-22 00:26:04 CET (Europe/Prague)",
+ "stopped_at": "2026-11-22 00:26 CET: 524k stopped mid-prefill; 786k/1M probe skipped.",
+ "stack": {
+  "venv": "~/.exo-inkling-bench/venv-betizzel (NEW; venv-dspark untouched)",
+  "python": "3.13.12",
+  "mlx": "0.32.4",
+  "mlx-metal": "0.32.4",
+  "mlx-vlm": "0.8.0+inkling2mini.1",
+  "commit": "55ca2e9e3df180dc2c46550e44309d6af5489b86",
+  "branch": "m5pro-inkling2",
+  "source": "https://github.com/betizzel/mlx-vlm/archive/55ca2e9e.zip (Apple git blocked by Xcode license; no sudo used)",
+  "extra": "torch 2.15.0 + torchvision 0.29.2 required to load the official processor (image processor)",
+  "draft_kind_from_load_drafter": "dflash",
+  "note": "load_drafter reports kind 'dflash' on this fork; that is the official Mini draft (mtp.safetensors)"
+ },
+ "weights": "thinkingmachines/Inkling-2-Mini official NVFP4+MXFP8, local dir ~/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini, bf16 KV, max-num-seqs 1",
+ "hardware": "Studio 1 Mac16,9 Apple M4 Max 64 GB, iogpu.wired_limit_mb=0 (unchanged), max_recommended_working_set 51.840 GiB",
+ "script": "unchanged ~/.exo-inkling-bench/bf16-longctx/bench_longctx.py, needle VIOLET-ANCHOR-4729",
+ "active_after_load_GiB": 18.777767457067966,
+ "runs": [
+  {
+   "ctx_target": 32768,
+   "dspark": false,
+   "prefill_step_size": 8192,
+   "max_tokens": 256,
+   "started": "2026-11-21T23:36:47",
+   "mem_before": {
+    "free_GiB": 4.77,
+    "inactive_GiB": 26.27,
+    "wired_GiB": 3.76,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "prompt_tokens_tokenizer": 32750,
+   "elapsed_s": 41.74435979197733,
+   "prompt_tokens": 32750,
+   "prompt_tps": 862.3095876828436,
+   "prefill_s": 37.97939912509173,
+   "generation_tokens": 126,
+   "decode_tps": 34.6734236983306,
+   "peak_mlx_GiB": 42.383070811629295,
+   "cached_tokens": 0,
+   "text": "<|message_model|><|content_thinking|>The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed find archivist's note in document. I saw in the text: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "finish_reason": "stop",
+   "needle_found": true,
+   "answer_tail": "ry archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "ok": true,
+   "mem_after": {
+    "free_GiB": 29.44,
+    "inactive_GiB": 4.24,
+    "wired_GiB": 24.22,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "finished": "2026-11-21T23:37:29"
+  },
+  {
+   "ctx_target": 131072,
+   "dspark": false,
+   "prefill_step_size": 8192,
+   "max_tokens": 256,
+   "started": "2026-11-21T23:37:29",
+   "mem_before": {
+    "free_GiB": 29.74,
+    "inactive_GiB": 4.24,
+    "wired_GiB": 23.92,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "prompt_tokens_tokenizer": 131054,
+   "elapsed_s": 213.25338987493888,
+   "prompt_tokens": 131054,
+   "prompt_tps": 628.8350804098454,
+   "prefill_s": 208.40758425020613,
+   "generation_tokens": 133,
+   "decode_tps": 27.95437184481108,
+   "peak_mlx_GiB": 45.806426204741,
+   "cached_tokens": 0,
+   "text": "<|message_model|><|content_thinking|>The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed find archivist's note in document. I saw in the Rheumatoid Arthritis section: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra text.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "finish_reason": "stop",
+   "needle_found": true,
+   "answer_tail": "chive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra text.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "ok": true,
+   "mem_after": {
+    "free_GiB": 25.77,
+    "inactive_GiB": 4.23,
+    "wired_GiB": 27.78,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "finished": "2026-11-21T23:41:03"
+  },
+  {
+   "ctx_target": 131072,
+   "dspark": true,
+   "prefill_step_size": 8192,
+   "max_tokens": 256,
+   "started": "2026-11-21T23:41:03",
+   "mem_before": {
+    "free_GiB": 26.21,
+    "inactive_GiB": 4.23,
+    "wired_GiB": 27.34,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "prompt_tokens_tokenizer": 131054,
+   "elapsed_s": 222.0275601670146,
+   "prompt_tokens": 131054,
+   "prompt_tps": 626.8905619963841,
+   "prefill_s": 209.05403262516484,
+   "generation_tokens": 133,
+   "decode_tps": 10.347424468793719,
+   "peak_mlx_GiB": 49.035058323293924,
+   "cached_tokens": 0,
+   "text": "<|message_model|><|content_thinking|>The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed find archivist's note in document. I saw in the Rheumatoid Arthritis section: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra text.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "finish_reason": "stop",
+   "draft_rounds": 52,
+   "draft_accepted": 81,
+   "draft_drafted": 104,
+   "needle_found": true,
+   "answer_tail": "chive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra text.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "ok": true,
+   "mem_after": {
+    "free_GiB": 7.8,
+    "inactive_GiB": 3.54,
+    "wired_GiB": 47.0,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "finished": "2026-11-21T23:44:45"
+  },
+  {
+   "ctx_target": 262144,
+   "dspark": false,
+   "prefill_step_size": 4096,
+   "max_tokens": 256,
+   "started": "2026-11-21T23:48:28",
+   "mem_before": {
+    "free_GiB": 10.27,
+    "inactive_GiB": 22.77,
+    "wired_GiB": 3.74,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "prompt_tokens_tokenizer": 262126,
+   "elapsed_s": 585.6661037090234,
+   "prompt_tokens": 262126,
+   "prompt_tps": 452.1941713795078,
+   "prefill_s": 579.6757600840647,
+   "generation_tokens": 129,
+   "decode_tps": 22.62051110452022,
+   "peak_mlx_GiB": 39.44950718805194,
+   "cached_tokens": 0,
+   "text": "<|message_model|><|content_thinking|>The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed find archivist's note in document. I saw in the rachitis section: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra text.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "finish_reason": "stop",
+   "needle_found": true,
+   "answer_tail": "chive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra text.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "ok": true,
+   "mem_after": {
+    "free_GiB": 17.87,
+    "inactive_GiB": 6.33,
+    "wired_GiB": 31.54,
+    "swap_used_MB": 0.25,
+    "pressure": "1"
+   },
+   "finished": "2026-11-21T23:58:14"
+  }
+ ],
+ "runs_brief": [
+  {
+   "ctx_target": 32768,
+   "prompt_tokens": 32750,
+   "dspark": false,
+   "prefill_step_size": 8192,
+   "prompt_tps": 862.3095876828436,
+   "prefill_s": 37.97939912509173,
+   "decode_tps": 34.6734236983306,
+   "generation_tokens": 126,
+   "peak_mlx_GiB": 42.383070811629295,
+   "needle_found": true,
+   "ok": true,
+   "elapsed_s": 41.74435979197733,
+   "finish_reason": "stop",
+   "error": null
+  },
+  {
+   "ctx_target": 131072,
+   "prompt_tokens": 131054,
+   "dspark": false,
+   "prefill_step_size": 8192,
+   "prompt_tps": 628.8350804098454,
+   "prefill_s": 208.40758425020613,
+   "decode_tps": 27.95437184481108,
+   "generation_tokens": 133,
+   "peak_mlx_GiB": 45.806426204741,
+   "needle_found": true,
+   "ok": true,
+   "elapsed_s": 213.25338987493888,
+   "finish_reason": "stop",
+   "error": null
+  },
+  {
+   "ctx_target": 131072,
+   "prompt_tokens": 131054,
+   "dspark": true,
+   "prefill_step_size": 8192,
+   "prompt_tps": 626.8905619963841,
+   "prefill_s": 209.05403262516484,
+   "decode_tps": 10.347424468793719,
+   "generation_tokens": 133,
+   "peak_mlx_GiB": 49.035058323293924,
+   "needle_found": true,
+   "ok": true,
+   "elapsed_s": 222.0275601670146,
+   "finish_reason": "stop",
+   "error": null
+  },
+  {
+   "ctx_target": 262144,
+   "prompt_tokens": 262126,
+   "dspark": false,
+   "prefill_step_size": 4096,
+   "prompt_tps": 452.1941713795078,
+   "prefill_s": 579.6757600840647,
+   "decode_tps": 22.62051110452022,
+   "generation_tokens": 129,
+   "peak_mlx_GiB": 39.44950718805194,
+   "needle_found": true,
+   "ok": true,
+   "elapsed_s": 585.6661037090234,
+   "finish_reason": "stop",
+   "error": null
+  }
+ ],
+ "baseline_stock_v0.2.0": {
+  "32k": {
+   "prefill_tps": 667.9,
+   "decode_tps": 27.0,
+   "peak_GiB": 28.27,
+   "step": 1024
+  },
+  "131k": {
+   "prefill_tps": 401.9,
+   "decode_tps": 16.2,
+   "peak_GiB": 33.58,
+   "step": 512
+  },
+  "262k": {
+   "prefill_tps": 256.4,
+   "decode_tps": 10.7,
+   "peak_GiB": 35.38,
+   "step": 256
+  },
+  "524k": {
+   "prefill_tps": 129.4,
+   "decode_tps": 6.2,
+   "peak_GiB": 46.8,
+   "step": 128
+  }
+ },
+ "prefix_followup_131k": {
+  "attempted": true,
+  "script": "~/.exo-inkling-bench/bf16-longctx/prefix_followup.py",
+  "step": 4096,
+  "cold": {
+   "elapsed_s": 212.71859520906582,
+   "prompt_tokens": 131054,
+   "prompt_tps": 623.2838475038234,
+   "prefill_s": 210.2637514590751,
+   "decode_tps": 28.263147345773586,
+   "generation_tokens": 64,
+   "peak_mlx_GiB": 35.00321812555194,
+   "needle_found": false,
+   "note": "max_tokens=64, likely still in the thinking block so the needle string was not yet in the truncated text; the earlier 131k bench with 256 tokens did find the needle"
+  },
+  "followup": {
+   "ok": false,
+   "stopped": "SIGTERM after ~5.5 min with no generate() return",
+   "started_followup_approx": "2026-11-22 00:06:28 CET",
+   "stopped_at": "2026-11-22 00:10:58 CET",
+   "note": "This was not the cheap ~2s prefix-cache hit claimed on the betizzel card. generate() with the mutated prompt_cache plus a full multi-turn follow-up prompt did not return in 5.5 minutes (consistent with a second long prefill, or a hang). No cached_tokens figure was obtained."
+  },
+  "parked": true
+ },
+ "524k_attempt": {
+  "ctx_target": 524288,
+  "prompt_tokens_tokenizer_logged": 524268,
+  "dspark": false,
+  "prefill_step_size": 2048,
+  "max_tokens": 256,
+  "venv": "venv-betizzel",
+  "started": "2026-11-22T00:11:52",
+  "killed": "2026-11-22T00:26:04",
+  "tz": "Europe/Prague",
+  "elapsed_before_kill_s": 852,
+  "elapsed_before_kill": "14 min 12 s",
+  "pids": {
+   "wrapper": 65916,
+   "python": 65919
+  },
+  "log": "~/.exo-inkling-bench/bf16-longctx/betizzel-bench-524k.log",
+  "json": "~/.exo-inkling-bench/bf16-longctx/betizzel-bench-524k-step2048.json",
+  "ok": false,
+  "completed": false,
+  "phase_when_killed": "prefill",
+  "runs": [],
+  "prompt_tps": null,
+  "decode_tps": null,
+  "peak_mlx_GiB": null,
+  "needle_found": null,
+  "last_log_line": "== ctx 524288 n=524268 draft=False step=2048",
+  "rss_kib_when_polled": 10572640,
+  "fallback_step_1024": "not started (wrapper killed first)",
+  "reason": "Stopped by the operator mid-prefill to free the GPU for the patch work."
+ },
+ "skipped": [
+  "524k completed measurement (killed mid-prefill at step 2048 after 14 min 12 s; no throughput or peak recorded)",
+  "524k step-1024 fallback",
+  "786k/1M bf16 fit probe",
+  "FP8 global-KV (no KV=fp8 benches, no compare_kv quality run)",
+  "server relaunch on 127.0.0.1:52417"
+ ],
+ "speedup_vs_stock_v0.2.0": {
+  "32k_no_draft_step8192": {
+   "prefill": 1.2910615361581075,
+   "decode": 1.2842008777159482,
+   "peak_GiB": 42.38,
+   "stock_peak_GiB": 28.27
+  },
+  "131k_no_draft_step8192": {
+   "prefill": 1.564655586986428,
+   "decode": 1.7255785089389557,
+   "peak_GiB": 45.81,
+   "stock_peak_GiB": 33.58
+  },
+  "131k_dflash_step8192": {
+   "prefill": 626.8905619963841,
+   "decode": 10.347424468793719,
+   "note": "decode worse than stock DSpark 19.75 tok/s and than no-draft 27.95; peak 49.04 GiB vs stock DSpark 44.51",
+   "peak_GiB": 49.04
+  },
+  "262k_no_draft_step4096": {
+   "prefill": 1.7636278134926202,
+   "decode": 2.1140664583663757,
+   "peak_GiB": 39.45,
+   "stock_peak_GiB": 35.38,
+   "note": "step 4096 peaked lower than 131k at step 8192"
+  }
+ }
+}

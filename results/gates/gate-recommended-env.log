@@ -1,0 +1,6 @@
+{"ctx": 32768, "step": 2048, "max_tokens": 256, "elapsed_s": 41.19406112493016, "prompt_tokens": 32750, "prompt_tps": 863.6003007769161, "decode_tps": 39.799099828568146, "gen_tokens": 126, "peak_mlx_GiB": 22.78174703195691, "needle_found":
+{"ctx": 131072, "step": 2048, "max_tokens": 256, "elapsed_s": 214.38405400002375, "prompt_tokens": 131054, "prompt_tps": 623.5601656961974, "decode_tps": 31.197505407650144, "gen_tokens": 126, "peak_mlx_GiB": 25.78247945383191, "needle_foun
+ctx 32768 ptps 863.6 dtps 39.80 peak 22.78 needle True tokens_equal True sha_equal True (fork 845.5/33.46/26.19)
+ctx 131072 ptps 623.6 dtps 31.20 peak 25.78 needle True tokens_equal True sha_equal True (fork 605.1/27.13/29.62)
+262144 [Errno 2] No such file or directory: 'stE-262144.json'
+STACKEDONE

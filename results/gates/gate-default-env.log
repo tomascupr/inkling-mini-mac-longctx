@@ -1,0 +1,7 @@
+{"ctx": 32768, "step": 2048, "max_tokens": 256, "elapsed_s": 41.9583916249685, "prompt_tokens": 32750, "prompt_tps": 847.7576858639683, "decode_tps": 39.9196516650161, "gen_tokens": 126, "peak_mlx_GiB": 26.058791611343622, "needle_found": t
+{"ctx": 131072, "step": 2048, "max_tokens": 256, "elapsed_s": 217.4528872910887, "prompt_tokens": 131054, "prompt_tps": 614.7052970126771, "decode_tps": 31.18837163779947, "gen_tokens": 126, "peak_mlx_GiB": 29.059554550796747, "needle_found
+{"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 589.8971936670132, "prompt_tokens": 262126, "prompt_tps": 448.70469636724346, "decode_tps": 23.864088280344642, "gen_tokens": 129, "peak_mlx_GiB": 33.06072947755456, "needle_foun
+ctx 32768 ptps 847.8 dtps 39.92 peak 26.06 needle True tokens_equal True sha_equal True (fork 845.5/33.46/26.19)
+ctx 131072 ptps 614.7 dtps 31.19 peak 29.06 needle True tokens_equal True sha_equal True (fork 605.1/27.13/29.62)
+ctx 262144 ptps 448.7 dtps 23.86 peak 33.06 needle True
+STACKDONE

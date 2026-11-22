@@ -1,0 +1,160 @@
+diff -ru a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py	2026-11-22 00:32:01.339447118 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 00:41:07.230038170 +0100
+@@ -169,6 +169,36 @@
+     return (values[0], values[0]) if len(values) == 1 else tuple(values)
+ 
+ 
++def _exact_text_chunk_embed(model, input_ids, inputs_embeds, pixel_values):
++    """Per-chunk embedding for text-only Inkling 2 prompts, else None."""
++    if os.environ.get("MLX_VLM_EXACT_CHUNK_EMBED", "1") == "0":
++        return None
++    lm = getattr(model, "language_model", None)
++    text_model = getattr(lm, "model", None)
++    if (
++        pixel_values is not None
++        or input_ids is None
++        or not hasattr(text_model, "embed")
++        or getattr(model, "model_type", None) not in ("inkling2", "inkling2_loop")
++        or input_ids.ndim != 2
++        or input_ids.shape[1] != inputs_embeds.shape[1]
++    ):
++        return None
++    return text_model.embed
++
++
++def _exact_reserve_kv(prompt_cache, new_tokens):
++    """Give each empty or full-attention KVCache capacity for new_tokens more
++    keys in one allocation. Slots past offset are never read."""
++    if os.environ.get("MLX_VLM_EXACT_KV_RESERVE", "1") == "0" or not prompt_cache:
++        return
++    for entry in prompt_cache:
++        subs = getattr(entry, "caches", None)
++        for c in subs if subs is not None else [entry]:
++            if type(c) is cache.KVCache:
++                c.reserve_tokens = int(c.offset) + int(new_tokens)
++
++
+ @on_generation_stream
+ def generate_step(
+     input_ids: mx.array,
+@@ -478,6 +508,17 @@
+         should_chunk = (
+             prefill_step_size is not None and inputs_embeds.shape[1] > 1
+         ) or bool(checkpoint_lengths)
++        # Exact long-context memory: (a) embed text-only prompts one chunk at a
++        # time instead of materializing [1, N, hidden] for the whole prompt
++        # (4.5 GiB bf16 at 1M tokens); embedding and its norm are per token.
++        # (b) reserve the full-attention caches once for prompt + max_tokens so
++        # they never grow by concatenate (a transient second copy of each).
++        chunk_embed = (
++            _exact_text_chunk_embed(model, input_ids, inputs_embeds, pixel_values)
++            if prefill_step_size is not None and should_chunk
++            else None
++        )
++        _exact_reserve_kv(prompt_cache, inputs_embeds.shape[1] + max(int(max_tokens or 0), 0))
+         if prefill_step_size is not None and should_chunk:
+             # Chunked prefill with embeddings
+             total_tokens = inputs_embeds.shape[1]
+@@ -499,7 +540,11 @@
+                     }
+                     chunk_output = model.language_model(
+                         inputs=input_ids[:, :n_to_process],
+-                        inputs_embeds=inputs_embeds[:, :n_to_process],
++                        inputs_embeds=(
++                            chunk_embed(input_ids[:, :n_to_process])
++                            if chunk_embed is not None
++                            else inputs_embeds[:, :n_to_process]
++                        ),
+                         cache=prompt_cache,
+                         n_to_process=n_to_process,
+                         **chunk_kwargs,
+@@ -518,6 +563,8 @@
+                     pbar.update(n_to_process)
+ 
+             input_ids = input_ids[:, -1:]
++            if chunk_embed is not None:
++                inputs_embeds = chunk_embed(input_ids)
+ 
+         y, logprobs = _step(input_ids, inputs_embeds=inputs_embeds)
+ 
+diff -ru a/mlx_vlm/models/cache.py b/mlx_vlm/models/cache.py
+--- a/mlx_vlm/models/cache.py	2026-11-22 00:32:01.347445995 +0100
++++ b/mlx_vlm/models/cache.py	2026-11-22 00:32:20.688732787 +0100
+@@ -510,7 +510,11 @@
+         if self.keys is None or (prev + keys.shape[2]) > self.keys.shape[2]:
+             B, n_kv_heads, _, k_head_dim = keys.shape
+             v_head_dim = values.shape[3]
+-            n_steps = (self.step + keys.shape[2] - 1) // self.step
++            # A reserve hint (generate_step) sizes the buffer once for the
++            # whole request instead of growing by concatenate per chunk.
++            have = 0 if self.keys is None else prev
++            want = max(keys.shape[2], getattr(self, "reserve_tokens", 0) - have)
++            n_steps = (self.step + want - 1) // self.step
+             k_shape = (B, n_kv_heads, n_steps * self.step, k_head_dim)
+             v_shape = (B, n_kv_heads, n_steps * self.step, v_head_dim)
+             new_k = mx.zeros(k_shape, keys.dtype)
+diff -ru a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/language.py
+--- a/mlx_vlm/models/inkling2/language.py	2026-11-22 00:32:01.379441507 +0100
++++ b/mlx_vlm/models/inkling2/language.py	2026-11-22 00:32:01.531420187 +0100
+@@ -803,11 +803,22 @@
+             pre_norm, captured = (
+                 result if capture_layer_ids is not None else (result, None)
+             )
++            # Prefill callers pass logits_to_keep=1 and read only the last row.
++            # The final norm and the head are per token, so computing only the
++            # kept rows changes no value that is read; without this the head
++            # (and an FP32 copy of it for chunks over 15 rows) runs on every
++            # token of the chunk whenever the logits are evaluated.
++            keep = kwargs.get("logits_to_keep") or 0
++            head_input = (
++                pre_norm[:, -keep:, :]
++                if keep and pre_norm.ndim == 3 and pre_norm.shape[1] > keep
++                else pre_norm
++            )
+             return LanguageModelOutput(
+                 logits=(
+                     None
+                     if skip_logits
+-                    else self._logits_from_norm(self.model.norm(pre_norm))
++                    else self._logits_from_norm(self.model.norm(head_input))
+                 ),
+                 hidden_states=(
+                     captured
+diff -ru a/mlx_vlm/models/inkling2_loop/language.py b/mlx_vlm/models/inkling2_loop/language.py
+--- a/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 00:32:01.379441507 +0100
++++ b/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 00:51:55.403414552 +0100
+@@ -22,6 +22,13 @@
+ from ..inkling2.language import _attention_residual
+ from .config import TextConfig
+ 
++import os as _os
++
++# Exact long-context memory knobs (see exact/README in the Studio 1 pack).
++_PREFILL_EVAL_EVERY = int(_os.environ.get("MLX_VLM_EXACT_PREFILL_EVAL_EVERY", "0"))
++_PREFILL_EVAL_ASYNC = _os.environ.get("MLX_VLM_EXACT_PREFILL_EVAL_ASYNC", "0") == "1"
++_PREFILL_EVAL_MIN_TOKENS = 16
++
+ 
+ class MessageGate(nn.Module):
+     """(1 - forget) * hidden + gain * message, gated from both normalized inputs."""
+@@ -207,6 +214,19 @@
+                 x = layer(x, blocks, c)
+             if speculative_verify and (step + 1) % 4 == 0:
+                 mx.async_eval(x)
++            elif (
++                _PREFILL_EVAL_EVERY
++                and x.shape[1] >= _PREFILL_EVAL_MIN_TOKENS
++                and (step + 1) % _PREFILL_EVAL_EVERY == 0
++            ):
++                # Prefill chunk: evaluate in slices of layer visits so each
++                # visit's activations are released before the next visits are
++                # scheduled. Scheduling only; every value is unchanged.
++                # The visit's cache states are evaluated too: a lazy conv
++                # state otherwise keeps the visit's whole input alive.
++                (mx.async_eval if _PREFILL_EVAL_ASYNC else mx.eval)(
++                    x, c.state if c is not None else []
++                )
+         h = self.final_input(blocks, x)[..., 0, :]
+         normalized = self.norm(h).astype(x.dtype)
+         if total in requested:

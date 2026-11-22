@@ -1,0 +1,11 @@
+{
+ "weights_bytes": 5498196613.565217,
+ "parts": {
+  "attn_proj": 2581659648.0,
+  "experts": 1839366144,
+  "router+norms+convs+queries": 36698245.565217376,
+  "messages": 114130944.0,
+  "head": 926332416,
+  "embed_row": 9216
+ }
+}
