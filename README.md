@@ -5,7 +5,7 @@ on one 64 GB Mac Studio, at full quality: our patches leave the model's output *
 we have measured up to 262k tokens on one Mac so far.
 
 **Before** = the standard MLX build people use to run Inkling-2-Mini on a Mac today (inkling2-mlx v0.2.0).
-**After** = the same build with the patches in this repo. Same Mac (M4 Max, 64 GB), same official weights, same prompts.
+**After** = this repo: a community fork of that MLX code plus our patches (credits below). Same Mac (M4 Max, 64 GB), same official weights, same prompts.
 
 Speeds are tokens per second. **Reading** = processing your prompt or document (prefill).
 **Writing** = generating the answer (decode).
