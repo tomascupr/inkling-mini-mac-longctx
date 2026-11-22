@@ -326,3 +326,10 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   Writing unchanged. WIN; default in `env.sh` and `serve.sh`.
 - Expert GEMM reading x rows in place via `lhs_indices` (`PF_LHS=1`) in the server: 4k 354.9, 32k 341.1. MLX takes a
   much slower gather kernel when `lhs_indices` is not the identity. FAIL.
+- Global-visit attention tiles at 4k (`attnbench3`, all bitwise): base 9.70 ms, BQ128 10.99, BQ128+KT1 11.96, KT2 9.83,
+  FAST_MASK=0 9.76, K_ROWMAJOR 9.86, PIPELINE_QK 9.62, PAD0 9.95; PAD16 fails to load. No change worth taking. FAIL.
+- `PF_MGF=1` on top of BQ_SWA64 (S1, 4k): 1114.4 -> 1116.3. Noise. FAIL.
+- **S2 same session h28 (22:10–22:16 CET), MLX-Serve then ours (serve.sh settings + BQ_SWA64), warm runs:** reading 4k
+  MLX-Serve 1040.5 / 1033.9 / 1033.6 vs ours 1040.1 / 1019.8; 32k 895.5 / 896.7 / 895.6 vs 919.5 / 918.2 / 919.2
+  (+2.6%). Writing 4k 74.8–76.7 vs 79.4 / 80.1; 32k 71.7–72.4 vs 76.5 / 76.4. Needle 18/18. 4k reading is within
+  about 0.6%, still slightly behind on average.
