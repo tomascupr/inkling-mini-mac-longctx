@@ -3,7 +3,7 @@
 # (no git needed), an unpatched copy for reference runs and a patched copy.
 #
 #   bash scripts/install.sh            ROOT=~/inkling-mini by default
-#   PREFIX=1 bash scripts/install.sh   also apply 0004-prefix-cache.patch to the patched copy
+#   PREFIX=1 bash scripts/install.sh   also apply 0004-prefix-cache.patch (+ 0006 eviction fix) to the patched copy
 #   DSPARK=1 bash scripts/install.sh   also apply 0005-dspark-compiled-verify.patch (faster speculative decoding;
 #                                      not combinable with PREFIX=1 yet)
 #
@@ -34,6 +34,7 @@ if [ "${DSPARK:-0}" = 1 ]; then
 fi
 if [ "${PREFIX:-0}" = 1 ]; then
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0004-prefix-cache.patch")
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0006-prefix-cache-evict-fix.patch")
 fi
 [ -x "$ROOT/venv/bin/python" ] || "$PYBIN" -m venv "$ROOT/venv"
 "$ROOT/venv/bin/pip" install --quiet --upgrade pip
