@@ -12,9 +12,11 @@ Rounding never favours this repo: its means are rounded down, MLX-Serve's up, di
 Verdict: "faster" only if, in every session, our slowest counted run beats MLX-Serve's fastest one; "behind" if
 MLX-Serve's slowest beats our fastest in every session; otherwise "level".
 
-Writes docs/img/{reading,writing}-vs-mlxserve.svg, docs/img/long-context.svg, results/h2h-20261122/summary.json and
-the generated blocks (between <!-- gen:NAME --> and <!-- /gen:NAME -->) in README.md and docs/BENCHMARKS.md.
-usage: python scripts/charts.py [--png]     (--png also writes PNG copies next to the SVGs, e.g. for posts)
+Writes docs/img/{reading,writing}-vs-mlxserve.svg, docs/img/long-context.svg, the 1600x900 PNGs for X
+(docs/img/x-vs-mlxserve.png with both metrics, docs/img/x-{reading,writing}-vs-mlxserve.png),
+results/h2h-20261122/summary.json and the generated blocks (between <!-- gen:NAME --> and <!-- /gen:NAME -->) in
+README.md and docs/BENCHMARKS.md.
+usage: python scripts/charts.py
 """
 import json, logging, math, os, re, sys
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
@@ -29,6 +31,9 @@ H2H = os.path.join(ROOT, "results", "h2h-20261122")
 IMG = os.path.join(ROOT, "docs", "img")
 INK, OURS, THEIRS, GRID, MUTED, LOSS = "#111827", "#2563eb", "#9ca3af", "#e5e7eb", "#6b7280", "#b91c1c"
 METRICS = (("reading", "Reading a prompt (prefill)"), ("writing", "Writing the answer (decode), draft head on"))
+X_BG, X_INK, X_MUTED, X_THEIRS, X_OURS, X_GAIN, X_LOSS = (
+    "#0b1220", "#f8fafc", "#94a3b8", "#4b5563", "#3b82f6", "#60a5fa", "#f87171")
+X_DPI, X_SIZE = 100, (16, 9)
 
 MS_RE = re.compile(r"<- (\d+)\+(\d+) tokens streamed \[prefill: ([\d.]+) tok/s, decode: ([\d.]+) tok/s\]")
 OURS_RE = re.compile(r"(?:Request completed:.*?|LOG )prompt_tokens=(\d+).*?prefill=([\d.]+) tok/s decode=([\d.]+) tok/s")
@@ -155,6 +160,11 @@ def analyse(sessions):
     return rows
 
 
+def verdict_text(r):
+    return {"faster": f"{fmt_pct(r['delta'], 1)} faster", "behind": f"{fmt_pct(r['delta'], 1)} behind",
+            "level": f"level ({fmt_pct(r['delta'], 2)})"}[r["verdict"]]
+
+
 def verdict_cell(row, bold=True):
     if row["verdict"] == "faster":
         s = f"{fmt_pct(row['delta'], 1)} faster"
@@ -248,7 +258,7 @@ def replace_block(path, name, body):
     open(path, "w").write(text[: i + len(start)] + "\n" + body + "\n" + text[j:])
 
 
-def h2h_chart(path, metric, title, rows, sessions, png):
+def h2h_chart(path, metric, title, rows, sessions):
     rows = [r for r in rows if r["metric"] == metric]
     fig, ax = plt.subplots(figsize=(7.6, 5.0))
     fig.subplots_adjust(left=0.1, right=0.98, top=0.74, bottom=0.27)
@@ -263,11 +273,8 @@ def h2h_chart(path, metric, title, rows, sessions, png):
             ax.scatter(xs, [float(v) for v in vals], s=14, color=INK, edgecolor="white", linewidth=0.6, zorder=3)
             ax.text(xc, float(m) * 0.93, fmt(rounder(m)), ha="center", va="top", fontsize=10, color="white",
                     fontweight="bold", zorder=4)
-        v = r["verdict"]
-        txt = {"faster": f"{fmt_pct(r['delta'], 1)} faster", "behind": f"{fmt_pct(r['delta'], 1)} behind",
-               "level": f"level ({fmt_pct(r['delta'], 2)})"}[v]
-        ax.text(i, float(top) * 1.06, txt, ha="center", va="bottom", fontsize=11.5, fontweight="bold",
-                color={"faster": OURS, "behind": LOSS, "level": MUTED}[v])
+        ax.text(i, float(top) * 1.06, verdict_text(r), ha="center", va="bottom", fontsize=11.5, fontweight="bold",
+                color={"faster": OURS, "behind": LOSS, "level": MUTED}[r["verdict"]])
     ax.set_xticks(range(len(rows)), [f"{r['label']} prompt\n({r['prompt']:,} tokens)" for r in rows], fontsize=10.5)
     ax.set_xlim(-0.6, len(rows) - 0.4)
     ax.set_ylim(0, float(top) * 1.2)
@@ -290,10 +297,76 @@ def h2h_chart(path, metric, title, rows, sessions, png):
                          "run of ours beats\nevery MLX-Serve run in each session. Not counted: MLX-Serve's 16-token "
                          f"warm-up and our first request per prompt length\n(ours, tok/s: {firsts}). "
                          "Raw runs and method: docs/BENCHMARKS.md", fontsize=7.8, color=MUTED, linespacing=1.4)
-    save(fig, path, png)
+    save(fig, path)
 
 
-def long_chart(path, cfg, png):
+def fit(text, px, largest):
+    """Largest font size (pt, at most `largest`) at which `text` in bold Inter fits in `px` pixels at X_DPI."""
+    em = sum(0.64 if c.isdigit() else 0.62 if c.isalpha() or c in "%+−" else 0.3 for c in text)
+    return min(largest, px / em * 72 / X_DPI)
+
+
+def x_panel(ax, rows, title=None):
+    w, gap = 0.36, 0.025
+    top = max(float(max(r["mlxserve_mean"], r["ours_mean"])) for r in rows)
+    ax.set_facecolor(X_BG)
+    ax.set_xlim(-0.55, len(rows) - 0.45)
+    ax.set_ylim(0, top * 1.38)
+    unit = ax.get_window_extent().width / (len(rows) + 0.1)
+    for i, r in enumerate(rows):
+        for xc, m, col, txt in ((i - w / 2 - gap, r["mlxserve_mean"], X_THEIRS, fmt(up(r["mlxserve_mean"]))),
+                                (i + w / 2 + gap, r["ours_mean"], X_OURS, fmt(down(r["ours_mean"])))):
+            ax.bar(xc, float(m), w, color=col, zorder=2)
+            ax.text(xc, float(m) + top * 0.025, txt, ha="center", va="bottom", color=X_INK, fontweight="bold",
+                    fontsize=fit(txt, unit * (w + 2 * gap) * 0.85, 30))
+        txt = verdict_text(r)
+        ax.text(i, top * 1.2, txt, ha="center", va="bottom", fontweight="bold", fontsize=fit(txt, unit * 0.92, 32),
+                color={"faster": X_GAIN, "behind": X_LOSS, "level": "#cbd5e1"}[r["verdict"]])
+    ticks = [f"{r['label']} prompt" for r in rows]
+    ax.set_xticks(range(len(rows)), ticks, fontsize=min(fit(t, unit * 0.95, 26) for t in ticks), color=X_INK)
+    ax.set_yticks([])
+    ax.tick_params(axis="x", length=0, pad=14)
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+    ax.spines["bottom"].set_color(X_MUTED)
+    if title:
+        ax.set_title(title, loc="left", fontsize=26, color=X_INK, fontweight="bold", pad=18)
+
+
+def x_chart(path, panels, title, subtitle, sessions):
+    """1600x900 PNG for X: one panel per (rows, panel title), bars from zero, values on the bars, no y axis."""
+    fig, axes = plt.subplots(1, len(panels), figsize=X_SIZE, dpi=X_DPI, facecolor=X_BG, squeeze=False)
+    fig.subplots_adjust(left=0.035, right=0.975, top=0.64 if len(panels) > 1 else 0.7, bottom=0.23, wspace=0.1)
+    for ax, (rows, panel_title) in zip(axes[0], panels):
+        x_panel(ax, rows, panel_title)
+    fig.text(0.035, 0.9, title, fontsize=40, fontweight="bold", color=X_INK)
+    fig.text(0.035, 0.835, subtitle, fontsize=20, color=X_MUTED)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in (X_THEIRS, X_OURS)]
+    fig.legend(handles, ["MLX-Serve", "Ours"], loc="upper right", bbox_to_anchor=(0.975, 0.8), ncol=2,
+               frameon=False, fontsize=22, labelcolor=X_INK, handlelength=1.2, columnspacing=1.5)
+    fig.text(0.035, 0.03, f"Sessions {session_names(sessions)}.\n"
+                          "Server-reported rates, mean of warm runs: MLX-Serve's 16-token warm-up and our first request "
+                          "per prompt length not counted.\nOur means rounded down, MLX-Serve's up. Faster = our slowest "
+                          "run beat MLX-Serve's fastest in every session. Method: docs/BENCHMARKS.md",
+             fontsize=14, color=X_MUTED, linespacing=1.5)
+    fig.savefig(path, format="png", facecolor=X_BG, metadata={"Software": None})
+    plt.close(fig)
+
+
+def x_charts(rows, sessions):
+    by = {m: [r for r in rows if r["metric"] == m] for m, _ in METRICS}
+    what = "Inkling 2 Mini, same official weights · M4 Max Mac Studio, same session · tokens per second"
+    x_chart(os.path.join(IMG, "x-vs-mlxserve.png"),
+            [(by["reading"], "Reading a prompt (prefill)"), (by["writing"], "Writing the answer (decode)")],
+            "Inkling 2 Mini vs MLX-Serve",
+            "Same official weights · M4 Max Mac Studio, same session · tokens per second · draft heads on", sessions)
+    x_chart(os.path.join(IMG, "x-reading-vs-mlxserve.png"), [(by["reading"], None)],
+            "Reading speed vs MLX-Serve", what, sessions)
+    x_chart(os.path.join(IMG, "x-writing-vs-mlxserve.png"), [(by["writing"], None)],
+            "Writing speed vs MLX-Serve", what + " · draft heads on", sessions)
+
+
+def long_chart(path, cfg):
     runs_ = [json.load(open(os.path.join(ROOT, f)))["runs"][0] for f in cfg["long_context_runs"]]
     labels = cfg["long_context_labels"]
     fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.3))
@@ -318,13 +391,11 @@ def long_chart(path, cfg, png):
              fontsize=9, color=MUTED)
     fig.text(0.02, 0.03, "Under each bar: peak MLX GPU memory. Sources: " + ", ".join(
         os.path.basename(f) for f in cfg["long_context_runs"]) + " (results/gates/)", fontsize=7.5, color=MUTED)
-    save(fig, path, png)
+    save(fig, path)
 
 
-def save(fig, path, png):
+def save(fig, path):
     fig.savefig(path, format="svg", metadata={"Date": None})
-    if png:
-        fig.savefig(path[:-4] + ".png", format="png", dpi=200)
     plt.close(fig)
 
 
@@ -339,14 +410,14 @@ def as_json(x):
 
 
 def main():
-    png = "--png" in sys.argv
     os.makedirs(IMG, exist_ok=True)
     cfg = json.load(open(os.path.join(H2H, "charts.json")))
     sessions = [dict(s, data=load_pair(s["log"], s["log"])) for s in cfg["h2h_sessions"]]
     rows = analyse(sessions)
     for metric, title in METRICS:
-        h2h_chart(os.path.join(IMG, f"{metric}-vs-mlxserve.svg"), metric, title, rows, sessions, png)
-    long_chart(os.path.join(IMG, "long-context.svg"), cfg, png)
+        h2h_chart(os.path.join(IMG, f"{metric}-vs-mlxserve.svg"), metric, title, rows, sessions)
+    x_charts(rows, sessions)
+    long_chart(os.path.join(IMG, "long-context.svg"), cfg)
     replace_block(os.path.join(ROOT, "README.md"), "h2h-table", readme_table(rows, sessions))
     bench = os.path.join(ROOT, "docs", "BENCHMARKS.md")
     replace_block(bench, "h2h-pooled", bench_pooled(rows))

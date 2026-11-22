@@ -449,7 +449,7 @@ Details: `docs/trackA-prefill-notes.md`, `docs/trackB-decode-notes.md`, `docs/PR
 |---|---|
 | `scripts/install.sh` | Fork zip → unpatched and patched source trees and a venv |
 | `scripts/env.sh`, `scripts/serve.sh` | Default environment; OpenAI-compatible server with the benchmarked settings |
-| `scripts/charts.py` | Charts, README table and the generated tables here, from the logs (`--png` for PNG copies) |
+| `scripts/charts.py` | Charts (SVG for the docs, 1600×900 PNG renders `docs/img/x-*.png` for posts), README table and the generated tables here, from the logs |
 | `scripts/gate.sh`, `scripts/exact_check.py`, `scripts/exact_check_draft.py` | Exactness and speed gate: token ids and log-probability sha, unpatched vs patched |
 | `scripts/quality/top1.py` | 8-prompt greedy + teacher-forced top-1 gate |
 | `scripts/probe_exact.py`, `scripts/memprof.py` | Synthetic-depth memory probe; per-chunk working-memory profiler |
