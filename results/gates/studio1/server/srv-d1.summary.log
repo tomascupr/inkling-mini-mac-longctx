@@ -1,0 +1,14 @@
+2026-11-22 18:12:57,607 - INFO - Loading speculative drafter (auto): /Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini
+2026-11-22 18:12:57,627 - INFO - Auto-detected --draft-kind='dflash' for drafter '/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini' (model_type='inkling2_dspark').
+2026-11-22 18:13:03,990 - INFO - Prefill completed: request=11e7f1e50 prompt_tokens=4078 cached_tokens=0 elapsed=6.323s rate=644.9 tok/s
+2026-11-22 18:13:08,145 - INFO - Decode completed: request=11e7f1e50 generated_tokens=123 elapsed=4.154s rate=29.4 tok/s finish_reason=stop
+2026-11-22 18:13:08,146 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=4078 generated_tokens=123 elapsed=11.574s prefill=644.9 tok/s decode=29.6 tok/s finish_reason=stop in_flight=0
+2026-11-22 18:13:13,717 - INFO - Prefill completed: request=11e7a6fd0 prompt_tokens=4078 cached_tokens=0 elapsed=5.504s rate=740.9 tok/s
+2026-11-22 18:13:17,826 - INFO - Decode completed: request=11e7a6fd0 generated_tokens=123 elapsed=4.108s rate=29.7 tok/s finish_reason=stop
+2026-11-22 18:13:17,827 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=4078 generated_tokens=123 elapsed=9.630s prefill=740.9 tok/s decode=29.9 tok/s finish_reason=stop in_flight=0
+2026-11-22 18:14:16,976 - INFO - Prefill completed: request=11e7a4050 prompt_tokens=32750 cached_tokens=0 elapsed=59.043s rate=554.7 tok/s
+2026-11-22 18:14:21,460 - INFO - Decode completed: request=11e7a4050 generated_tokens=126 elapsed=4.484s rate=27.9 tok/s finish_reason=stop
+2026-11-22 18:14:21,461 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=32750 generated_tokens=126 elapsed=63.583s prefill=554.7 tok/s decode=28.1 tok/s finish_reason=stop in_flight=0
+2026-11-22 18:15:20,508 - INFO - Prefill completed: request=11e9b39b0 prompt_tokens=32750 cached_tokens=0 elapsed=58.937s rate=555.7 tok/s
+2026-11-22 18:15:25,030 - INFO - Decode completed: request=11e9b39b0 generated_tokens=126 elapsed=4.522s rate=27.6 tok/s finish_reason=stop
+2026-11-22 18:15:25,030 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=32750 generated_tokens=126 elapsed=63.515s prefill=555.7 tok/s decode=27.9 tok/s finish_reason=stop in_flight=0

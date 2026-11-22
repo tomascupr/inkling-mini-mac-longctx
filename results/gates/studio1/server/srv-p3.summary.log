@@ -1,0 +1,8 @@
+2026-11-22 18:35:01,451 - INFO - Loading speculative drafter (auto): /Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini
+2026-11-22 18:35:01,472 - INFO - Auto-detected --draft-kind='dflash' for drafter '/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini' (model_type='inkling2_dspark').
+2026-11-22 18:35:05,876 - INFO - Prefill completed: request=11ead60d0 prompt_tokens=4078 cached_tokens=0 elapsed=4.367s rate=933.9 tok/s
+2026-11-22 18:35:09,406 - INFO - Decode completed: request=11ead60d0 generated_tokens=123 elapsed=3.529s rate=34.6 tok/s finish_reason=stop
+2026-11-22 18:35:09,406 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=4078 generated_tokens=123 elapsed=9.025s prefill=933.9 tok/s decode=34.9 tok/s finish_reason=stop in_flight=0
+2026-11-22 18:35:13,308 - INFO - Prefill completed: request=11ea7bbb0 prompt_tokens=4078 cached_tokens=0 elapsed=3.833s rate=1063.8 tok/s
+2026-11-22 18:35:16,806 - INFO - Decode completed: request=11ea7bbb0 generated_tokens=123 elapsed=3.498s rate=34.9 tok/s finish_reason=stop
+2026-11-22 18:35:16,806 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=4078 generated_tokens=123 elapsed=7.347s prefill=1063.8 tok/s decode=35.2 tok/s finish_reason=stop in_flight=0

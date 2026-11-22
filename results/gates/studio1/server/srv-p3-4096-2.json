@@ -1,0 +1,22 @@
+{
+ "tag": "p3-4096-2",
+ "elapsed_s": 7.353941916953772,
+ "ttft_s": 3.9308443749323487,
+ "prompt_tokens": 4078,
+ "completion_tokens": 123,
+ "prompt_tps": 1037.436136115204,
+ "decode_tps": 35.93236783061854,
+ "finish_reason": "stop",
+ "chunks": 118,
+ "usage": {
+  "prompt_tokens": 4078,
+  "completion_tokens": 123,
+  "total_tokens": 4201,
+  "prompt_tokens_details": {
+   "cached_tokens": 0
+  }
+ },
+ "needle_found": true,
+ "text_tail": "The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed inspect document. It contains an archivist's note: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.VIOLET-ANCHOR-4729",
+ "error": null
+}

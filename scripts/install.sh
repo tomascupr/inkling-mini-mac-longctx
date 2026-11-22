@@ -56,6 +56,14 @@ elif [ "${PREFIX:-0}" = 1 ]; then
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0004-prefix-cache.patch")
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0006-prefix-cache-evict-fix.patch")
 fi
+if [ "${DSPARK:-0}" != 1 ]; then
+    # Server: one greedy request decodes through the same compiled step as generate (same tokens).
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0014-server-compiled-decode.patch")
+fi
+if [ "$DRAFT" = 1 ]; then
+    # Server + draft head: a single request runs the exact-verify round loop (same tokens as no draft).
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0015-server-exact-draft.patch")
+fi
 [ -x "$ROOT/venv/bin/python" ] || "$PYBIN" -m venv "$ROOT/venv"
 "$ROOT/venv/bin/pip" install --quiet --upgrade pip
 "$ROOT/venv/bin/pip" install --quiet ./base "mlx==0.32.4"

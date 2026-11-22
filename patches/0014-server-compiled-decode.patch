@@ -1,0 +1,41 @@
+diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.417813605 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.741814416 +0100
+@@ -1334,6 +1334,26 @@
+         elif len(self.token_context) > len(self.uids):
+             self.token_context = self.token_context[: len(self.uids)]
+ 
++    def _compiled_single_step(self, inputs: mx.array, fwd_kwargs: dict):
++        # One greedy row on plain caches: the compiled decode step generate_step uses.
++        if (
++            inputs.shape[0] != 1
++            or fwd_kwargs
++            or not self.greedy_sampling
++            or self.compute_logprobs
++            or self.top_logprobs_k > 0
++            or (self.logits_processors and any(self.logits_processors))
++            or os.environ.get("MLX_VLM_INKLING2_SERVER_COMPILED_DECODE", "1") != "1"
++            or "inkling2" not in type(self._language_model).__module__
++        ):
++            return None
++        from ..models.inkling2.fast_decode import compiled_decode
++
++        served = compiled_decode(self._language_model, inputs[:, None], self.prompt_cache)
++        if served is None:
++            return None
++        return served[0].reshape(-1)
++
+     def _fused_greedy_step(self, inputs: mx.array, fwd_kwargs: dict):
+         if not self.greedy_sampling or self.compute_logprobs or self.top_logprobs_k > 0:
+             return None
+@@ -1373,7 +1393,9 @@
+         if self._rope_deltas is not None:
+             fwd_kwargs["rope_deltas"] = self._rope_deltas
+ 
+-        sampled = self._fused_greedy_step(inputs, fwd_kwargs)
++        sampled = self._compiled_single_step(inputs, fwd_kwargs)
++        if sampled is None:
++            sampled = self._fused_greedy_step(inputs, fwd_kwargs)
+         if sampled is not None:
+             self._next_tokens = sampled
+             self._next_lps = None

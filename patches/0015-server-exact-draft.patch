@@ -1,0 +1,84 @@
+diff -ruN b/mlx_vlm/generate/ar.py c/mlx_vlm/generate/ar.py
+--- b/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.741814416 +0100
++++ c/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.861814717 +0100
+@@ -233,6 +233,29 @@
+     return host_embed, restore
+ 
+ 
++def _full_rings(prompt_cache):
++    """Sliding-window caches left in concat layout by a multi-token prompt chunk,
++    as fixed full rings (what one-token decode leaves): same keys, temporal order."""
++    arrays = []
++    for entry in prompt_cache:
++        subs = getattr(entry, "caches", None)
++        for c in subs if subs is not None else [entry]:
++            if (
++                type(c) is cache.RotatingKVCache
++                and c.keys is not None
++                and c.keep == 0
++                and c.offset >= c.max_size
++                and c.keys.shape[2] != c.max_size
++            ):
++                keys = c._temporal_order(c.keys)[..., -c.max_size :, :]
++                values = c._temporal_order(c.values)[..., -c.max_size :, :]
++                c.keys, c.values = mx.contiguous(keys), mx.contiguous(values)
++                c._idx = c.max_size
++                arrays.extend((c.keys, c.values))
++    if arrays:
++        mx.eval(*arrays)
++
++
+ def _exact_reserve_kv(prompt_cache, new_tokens):
+     """Give each empty or full-attention KVCache capacity for new_tokens more
+     keys in one allocation. Slots past offset are never read."""
+@@ -2178,6 +2201,12 @@
+         self._prompt_uids = list(uids)
+         self.max_tokens = max_tokens
+         self.prefill_step_size = prefill_step_size
++        if draft_model is not None and len(input_ids) == 1:
++            _ctx = len(input_ids[0])
++            _lo = int(os.environ.get("MLX_VLM_INKLING2_DRAFT_MIN_CTX", "0"))
++            _hi = int(os.environ.get("MLX_VLM_INKLING2_DRAFT_MAX_CTX", "0"))
++            if _ctx < _lo or (_hi > 0 and _ctx > _hi):
++                draft_model = draft_kind = None
+         self._speculative_prefill = SpeculativePrefill(draft_kind, draft_model, model)
+         self.draft_model = draft_model
+         self.draft_kind = draft_kind
+@@ -2256,6 +2285,19 @@
+ 
+         if warm_cache is not None:
+             self.prompt_cache = warm_cache
++        elif (
++            draft_model is not None
++            and draft_kind == "dflash"
++            and len(input_ids) == 1
++            and right_pad_per_row is None
++            and kv_bits is None
++            and hasattr(model, "make_cache")
++            and os.environ.get("MLX_VLM_INKLING2_SERVER_PLAIN_SPEC", "1") == "1"
++        ):
++            self.prompt_cache = cache.make_prompt_cache(model)
++            self._plain_spec = True
++            _mt = max_tokens if isinstance(max_tokens, int) else max(max_tokens or [0])
++            _exact_reserve_kv(self.prompt_cache, max_length + int(_mt or 0) + 32)
+         elif draft_model is not None and draft_kind is not None:
+             self.prompt_cache = make_speculative_prompt_cache(
+                 model,
+@@ -2720,6 +2762,8 @@
+                     self._suffix_lens,
+                 )
+ 
++        if getattr(self, "_plain_spec", False):
++            _full_rings(self.prompt_cache)
+         if self.draft_model is not None and self.draft_kind is not None:
+             gen_batch = SpeculativeGenerationBatch(
+                 model=self.model,
+@@ -2741,6 +2785,8 @@
+                 greedy_sampling=self.greedy_sampling,
+                 thinking_budget_criteria=list(self.thinking_budget_criteria),
+             )
++            if getattr(self, "_plain_spec", False):
++                gen_batch.can_extend = False
+             compute_logprobs = False
+         else:
+             gen_batch = GenerationBatch(

@@ -1,0 +1,13 @@
+18:22:09 ctx 4096 k 0 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5
+cli-4096-k0 dtps 60.12 ptps 1063.6 needle True acc None rounds None misses 0 ntok 123 
+cli-4096-k0 dtps 60.10 ptps 1095.1 needle True acc None rounds None misses 0 ntok 123 
+18:22:24 ctx 4096 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5
+cli-4096-k8 dtps 74.66 ptps 1076.6 needle True acc 0.8032786885245902 rounds 26 misses 0 ntok 123 
+cli-4096-k8 dtps 79.98 ptps 1090.7 needle True acc 0.8032786885245902 rounds 26 misses 0 ntok 123 
+18:22:38 ctx 32768 k 0 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5
+cli-32768-k0 dtps 53.46 ptps 961.5 needle True acc None rounds None misses 0 ntok 126 
+cli-32768-k0 dtps 53.41 ptps 964.5 needle True acc None rounds None misses 0 ntok 126 
+18:23:54 ctx 32768 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5
+cli-32768-k8 dtps 71.56 ptps 958.4 needle True acc 0.8782608695652174 rounds 25 misses 0 ntok 126 
+cli-32768-k8 dtps 77.37 ptps 959.7 needle True acc 0.8782608695652174 rounds 25 misses 0 ntok 126 
+DSDONE

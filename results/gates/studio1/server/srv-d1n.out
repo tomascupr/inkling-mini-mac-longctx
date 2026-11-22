@@ -1,0 +1,25 @@
+d1n 4096 1 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 482.22961073743835, 'decode_tps': 30.60890633274906, 'needle_found': True, 'error': None}
+d1n 4096 2 {'prompt_tokens': 4078, 'completion_tokens': 123, 'prompt_tps': 716.2325780179194, 'decode_tps': 30.684854778530212, 'needle_found': True, 'error': None}
+d1n 32768 1 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 552.214276288842, 'decode_tps': 28.720711961574306, 'needle_found': True, 'error': None}
+d1n 32768 2 {'prompt_tokens': 32750, 'completion_tokens': 126, 'prompt_tps': 553.4136495411869, 'decode_tps': 28.634469315576702, 'needle_found': True, 'error': None}
+2026-11-22 18:16:53,715 - INFO - Decode progress: request=120fb83e0 generated_tokens=100 elapsed=3.796s rate=4.8 tok/s
+2026-11-22 18:16:54,061 - INFO - Decode progress: request=120fb83e0 generated_tokens=110 elapsed=4.142s rate=153847.7 tok/s
+2026-11-22 18:16:54,335 - INFO - Decode progress: request=120fb83e0 generated_tokens=120 elapsed=4.416s rate=249998.1 tok/s
+2026-11-22 18:16:54,485 - INFO - Decode completed: request=120fb83e0 generated_tokens=126 elapsed=4.566s rate=27.4 tok/s finish_reason=stop
+2026-11-22 18:16:54,485 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=32750 generated_tokens=126 elapsed=63.687s prefill=554.5 tok/s decode=27.6 tok/s finish_reason=stop in_flight=0
+2026-11-22 18:17:53,533 - INFO - Prefill completed: request=1211c79b0 prompt_tokens=32750 cached_tokens=0 elapsed=58.932s rate=555.7 tok/s
+2026-11-22 18:17:53,861 - INFO - Decode progress: request=1211c79b0 generated_tokens=10 elapsed=0.328s rate=172648.1 tok/s
+2026-11-22 18:17:54,253 - INFO - Decode progress: request=1211c79b0 generated_tokens=20 elapsed=0.720s rate=39801.0 tok/s
+2026-11-22 18:17:54,629 - INFO - Decode progress: request=1211c79b0 generated_tokens=30 elapsed=1.096s rate=24.8 tok/s
+2026-11-22 18:17:55,067 - INFO - Decode progress: request=1211c79b0 generated_tokens=40 elapsed=1.534s rate=33851.4 tok/s
+2026-11-22 18:17:55,382 - INFO - Decode progress: request=1211c79b0 generated_tokens=50 elapsed=1.849s rate=319994.6 tok/s
+2026-11-22 18:17:55,852 - INFO - Decode progress: request=1211c79b0 generated_tokens=60 elapsed=2.320s rate=45028.6 tok/s
+2026-11-22 18:17:56,248 - INFO - Decode progress: request=1211c79b0 generated_tokens=70 elapsed=2.715s rate=42032.9 tok/s
+2026-11-22 18:17:56,476 - INFO - Decode progress: request=1211c79b0 generated_tokens=80 elapsed=2.943s rate=13.5 tok/s
+2026-11-22 18:17:56,818 - INFO - Decode progress: request=1211c79b0 generated_tokens=90 elapsed=3.285s rate=24.8 tok/s
+2026-11-22 18:17:57,342 - INFO - Decode progress: request=1211c79b0 generated_tokens=100 elapsed=3.809s rate=4.8 tok/s
+2026-11-22 18:17:57,688 - INFO - Decode progress: request=1211c79b0 generated_tokens=110 elapsed=4.155s rate=169033.3 tok/s
+2026-11-22 18:17:57,963 - INFO - Decode progress: request=1211c79b0 generated_tokens=120 elapsed=4.430s rate=255364.0 tok/s
+2026-11-22 18:17:58,112 - INFO - Decode completed: request=1211c79b0 generated_tokens=126 elapsed=4.580s rate=27.3 tok/s finish_reason=stop
+2026-11-22 18:17:58,113 - INFO - Request completed: endpoint=/chat/completions model=/Users/tomascupr/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini stream=True backend=continuous_batching prompt_tokens=32750 generated_tokens=126 elapsed=63.572s prefill=555.7 tok/s decode=27.5 tok/s finish_reason=stop in_flight=0
+SRVDONE
