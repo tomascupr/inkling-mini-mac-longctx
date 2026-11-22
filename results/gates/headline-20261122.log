@@ -7,3 +7,5 @@
 {"ctx": 262144, "step": 2048, "max_tokens": 256, "elapsed_s": 603.2904902079608, "prompt_tokens": 262126, "prompt_tps": 439.01836167776537, "decode_tps": 21.80854348627794, "gen_tokens": 129, "peak_mlx_GiB": 34.178756192326546, "needle_found": true, "logprobs_
 262k exactness stacked(recommended env) vs stock fork: tokens_equal True sha_equal True stock ptps 439.0 dtps 21.81 peak 34.18 | stacked ptps 453.6 dtps 27.01 peak 27.35
 2026-11-22 05:15:21 CET RUN 1M stacked recommended-env step512 text-only
+{"ctx": 1048576, "step": 512, "max_tokens": 256, "elapsed_s": 6731.231289625168, "prompt_tokens": 1048558, "prompt_tps": 156.0160670660861, "decode_tps": 10.037020537187297, "gen_tokens": 95, "peak_mlx_GiB": 50.03794115036726, "needle_found": true, "logprobs_s
+2026-11-22 07:07:39 CET HEADLINE DONE

@@ -1,8 +1,8 @@
 # Run Inkling-2-Mini faster on a single Mac
 
 We made Thinking Machines' Inkling-2-Mini **write answers up to 2.5× faster** and **read long documents up to 1.8× faster**
-on one 64 GB Mac Studio, at full quality: our patches leave the model's output **bit-for-bit unchanged**. The model supports up to 1M tokens of context;
-we have measured up to 524k tokens on one Mac so far (a 1M-token run is in progress).
+on one 64 GB Mac Studio, at full quality: our patches leave the model's output **bit-for-bit unchanged**. The model supports up to 1M tokens of context,
+and we measured it at the full 1M on one Mac (the hidden fact was found; outputs are checked bit-for-bit through 262k).
 
 **Before** = the standard MLX build people use to run Inkling-2-Mini on a Mac today (inkling2-mlx v0.2.0).
 **After** = this repo: a community fork of that MLX code plus our patches (credits below). Same Mac (M4 Max, 64 GB), same official weights, same prompts.
@@ -17,10 +17,11 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 | 131k tokens | 401.9 → **624.3** | 16.2 → **35.8** | 1.55× / 2.21× |
 | 262k tokens | 256.4 → **453.6** | 10.7 → **27.0** | 1.77× / 2.52× |
 | 524k tokens | not measured* → **292.6** | not measured* → **17.9** | – |
+| 1M tokens | not measured* → **156.0** | not measured* → **10.0** | – |
 
-\* We have no 524k run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes, found the hidden fact, and peaked at 35.3 GiB of GPU memory.
+\* We have no 524k or 1M run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes (peak 35.3 GiB of GPU memory) and the full 1M-token document (1,048,558 tokens) in 1 h 52 min (peak 50.0 of the 51.8 GiB GPU limit), and found the hidden fact both times.
 
-The longer the prompt, the bigger the gain. At 32k–524k the model found a fact hidden in the middle of the document in every run, before and after.
+The longer the prompt, the bigger the gain. At 32k–1M the model found a fact hidden in the middle of the document in every run, before and after.
 Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Follow-up questions in 1.5 s
@@ -78,7 +79,7 @@ attention: this is the full bf16 model, just faster.
 
 ## What's next
 
-- **1M tokens on one Mac:** the model supports 1M tokens; our memory budget projects a 1M context to fit at full bf16 quality (~50.6 of the 51.8 GiB GPU limit). A full 1M run is next; not measured yet.
+- **1M tokens on one Mac:** measured (above). Next: speculative decoding and the prefix cache at 1M.
 - **Speculative decoding** at 262k+ and combined with the prefix cache: not measured yet.
 - More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~58–65% of its memory bandwidth on decode.
 

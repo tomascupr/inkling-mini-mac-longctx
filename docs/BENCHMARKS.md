@@ -20,6 +20,7 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 131k (131,054) | **624.3** | **35.80** | **23.34** | 401.9 / 16.2 / 33.58 | 1.55× / 2.21× | bit-identical to unpatched code |
 | 262k (262,126) | **453.6** | **27.01** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.52× | bit-identical to unpatched code |
 | 524k (524,270) | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
+| 1M (1,048,558), step 512, text-only | **156.0** | **10.04** | **50.04** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
 
 **Speculative decoding (DSpark) is not in the table above.** Every row compares the standard build and our build
 *without* a draft model. The standard build can already use Inkling's DSpark draft head: on the same Mac, 4k prompt,
@@ -69,9 +70,10 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
   (server log: cold `time_to_first_token=218.274s`, follow-up `cached_tokens=131006`, `time_to_first_token=1.459s`;
   the table uses the client-side times), `results/LEADERBOARD.tsv` (every experiment).
 
-1M: a full 1M-token needle run (recommended env, step 512, text-only) started 2026-11-22 05:15 CET and is not measured yet.
-*Estimate:* it projects to ~50.0 GiB peak against the 51.84 GiB cap (32 GiB of bf16 global KV + 17.6 GiB text weights
-+ ~0.4 GiB per-step working memory).
+1M: measured 2026-11-22 05:15–07:07 CET (`results/gates/h-1m.json`, `results/gates/headline-20261122.log`):
+1,048,558 prompt tokens read in 6,721 s (156.0 tok/s), 95 tokens written at 10.04 tok/s, needle found, peak 50.04 GiB
+against the 51.84 GiB cap (projection was ~50.0). Settings: recommended env, step 512, vision tower dropped
+(`scripts/exact_text_only.py`, text logits unchanged), default max context, no sysctl.
 
 4k row: "before" measured 2026-11-22 02:25 CET (Europe/Prague) on the unmodified standard build with the same
 `bench_longctx.py` and settings as the other baseline runs (bf16 KV, no draft, step 2048, 256 max tokens, needle found;
@@ -129,6 +131,7 @@ N tokens. (An earlier count charged every token the last chunk's depth, which ov
 | 131k | 15.78 | 900 | 624.3 | 69.4% |
 | 262k | 22.22 | 639 | 453.6 | 71.0% |
 | 524k | 35.11 | 404 | 292.6 | 72.4% |
+| 1M (step 512) | 60.88 | 233 | 156.0 | 67.0% |
 
 At 524k this is 18.4 PFLOP for the whole prompt (73% global attention), a floor of
 ~21.6 min at peak; measured 29.9 min. Where prefill time goes now: big matmuls run at ~96% of peak and
@@ -146,6 +149,7 @@ Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 | 131k | 9.96 | 18.24 | 54.8 | 35.80 | 65% |
 | 262k | 14.26 | 26.11 | 38.3 | 27.01 | 71% |
 | 524k | 22.85 | 41.85 | 23.9 | 17.86 | 75% |
+| 1M | 40.03 | 73.3 | 13.6 | 10.04 | 74% |
 
 The remaining decode gap is mostly CPU-side graph build/encode (~17 ms/token) and CPU↔GPU
 coupling, not GPU work: with large command buffers the GPU alone needs ~19.8 ms/token at 32k. Details: `docs/trackB-decode-notes.md`.
