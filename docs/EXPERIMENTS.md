@@ -6,6 +6,10 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **16:25 — patch 0010 gated on Studio 2 (applied to the stack8 tree, `MLX_VLM_INKLING2_PREFILL_FUSED=1`, step 2048,
+  eval-every 0): tokens AND logprob sha equal to the fork at 4k and 32k, needle found.** Reading 4k 879.6 / 901.0 (cold /
+  warm), 32k 803.6 / 803.5 (Studio 2 baseline same settings: 870.2 warm at 4k, 773.0 at 32k); writing unchanged
+  (52.3 / 49.0). `results/gates/studio2/p10-prefill-fused-4k32k.json`.
 - **16:10 — 1M with KT=3 + host vocab (Studio 1): reading 163.3 → 175.6 tok/s (+7.5%), writing 11.38, peak 50.08 GiB,
   needle found; tokens and logprob sha equal to the 163.3 run** (`results/gates/h7-1m-kt3-hostvocab.json`). The probe
   projected 170–178. Patches 0008/0009 committed; `install.sh` applies both (off unless their env is set).

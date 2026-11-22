@@ -1,0 +1,349 @@
+diff -ruN a/mlx_vlm/models/inkling2/prefill_fused.py b/mlx_vlm/models/inkling2/prefill_fused.py
+--- a/mlx_vlm/models/inkling2/prefill_fused.py	1970-01-01 01:00:00.000000000 +0100
++++ b/mlx_vlm/models/inkling2/prefill_fused.py	2026-11-22 16:13:36.842462876 +0100
+@@ -0,0 +1,331 @@
++"""Prefill (many-row) fused paths for Inkling 2: MLX_VLM_INKLING2_PREFILL_FUSED=1.
++
++Decode (one row) and short verify blocks (<= 8 rows) keep the fork's paths.
++On by default once enabled, bit-identical to the fork (tokens + logprob sha at 4k):
++  * SparseMoE: the route combine fused into the un-sort (one gather + weighted FP32
++    sum kernel, same order and roundings as the fork's multiply + reduction);
++  * ShortConvolution: the fork's virtual-concat kernel for any length;
++  * l2 clip: compiled.
++Opt-in, not bit-identical (relaxed quality gate, see docs/EXPERIMENTS.md):
++  PF_AR=1 attention residuals in one kernel without the stack; PF_MG=1 message gates
++  (norm+concat+cast kernel, forget/gain as one FP32 matmul); PF_PJ=1 merged projections.
++"""
++import os
++
++import mlx.core as mx
++
++from .. import switch_layers as S
++from . import language as L
++
++_K = {}
++def _moe_unsort_combine_kernel():
++    if "uc" not in _K:
++        _K["uc"] = mx.fast.metal_kernel(
++            name="moe_unsort_combine",
++            input_names=["y", "inv", "w"],
++            output_names=["out"],
++            compile_options={"math_mode": "safe"},
++            source="""
++            uint col = thread_position_in_grid.x;
++            uint t = thread_position_in_grid.y;
++            if (col >= D) return;
++            float acc = 0.0f;
++            for (int k = 0; k < K; ++k) {
++                uint r = inv[t * K + k];
++                float p = float(y[size_t(r) * D + col]) * w[t * K + k];
++                acc = acc + p;
++            }
++            out[size_t(t) * D + col] = static_cast<bfloat16_t>(acc);
++            """,
++        )
++    return _K["uc"]
++def moe_unsort_combine(y, inv, w):
++    """y: (N*K, D) sorted expert outputs (bf16); inv: (N*K,) uint32 rows; w: (N, K) f32.
++    Returns (N, D) bf16 = sum_k f32(y[inv[t*K+k]]) * w[t,k]."""
++    NK, D = y.shape
++    N, K = w.shape
++    return _moe_unsort_combine_kernel()(
++        inputs=[y, inv, w], template=[("D", D), ("K", K)],
++        grid=(D, N, 1), threadgroup=(256, 1, 1),
++        output_shapes=[(N, D)], output_dtypes=[mx.bfloat16])[0]
++
++# ---- attention residual over a list of states, many rows (prefill) ----
++_AR_SRC = r"""
++    // one threadgroup (TG threads) per row; E = D / TG elements per thread.
++    const uint lid = thread_position_in_threadgroup.x;
++    const uint lane = thread_index_in_simdgroup;
++    const uint sg = simdgroup_index_in_threadgroup;
++    const size_t row = threadgroup_position_in_grid.y;
++    constexpr int NSG = TG / 32;
++    constexpr int NR = NS + NS * Q;
++    float v[NS][E];
++    #define LOADS(s, P) for (int e = 0; e < E; ++e) v[s][e] = float(P[row * D + lid + e * TG]);
++    LOADS(0, s0)
++    if constexpr (NS > 1) { LOADS(1, s1) }
++    if constexpr (NS > 2) { LOADS(2, s2) }
++    if constexpr (NS > 3) { LOADS(3, s3) }
++    if constexpr (NS > 4) { LOADS(4, s4) }
++    if constexpr (NS > 5) { LOADS(5, s5) }
++    if constexpr (NS > 6) { LOADS(6, s6) }
++    if constexpr (NS > 7) { LOADS(7, s7) }
++    float qv[Q][E];
++    for (int q = 0; q < Q; ++q) for (int e = 0; e < E; ++e) qv[q][e] = query[q * D + lid + e * TG];
++    float part[NR];
++    for (int s = 0; s < NS; ++s) {
++        float a = 0; for (int e = 0; e < E; ++e) a += v[s][e] * v[s][e];
++        part[s] = a;
++        for (int q = 0; q < Q; ++q) {
++            float b = 0; for (int e = 0; e < E; ++e) b += v[s][e] * qv[q][e];
++            part[NS + s * Q + q] = b;
++        }
++    }
++    threadgroup float red[NSG][NR];
++    threadgroup float tot[NR];
++    for (int i = 0; i < NR; ++i) { float r = simd_sum(part[i]); if (lane == 0) red[sg][i] = r; }
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    if (lid < NR) { float a = 0; for (int g = 0; g < NSG; ++g) a += red[g][lid]; tot[lid] = a; }
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    float inv[NS];
++    for (int s = 0; s < NS; ++s) inv[s] = metal::precise::rsqrt(tot[s] / D + 1e-6f);
++    for (int q = 0; q < Q; ++q) {
++        float sc[NS]; float mx_ = -INFINITY;
++        for (int s = 0; s < NS; ++s) { sc[s] = tot[NS + s * Q + q] * inv[s] * scale[0]; mx_ = max(mx_, sc[s]); }
++        float den = 0; for (int s = 0; s < NS; ++s) { sc[s] = metal::precise::exp(sc[s] - mx_); den += sc[s]; }
++        float o[E];
++        for (int e = 0; e < E; ++e) o[e] = 0;
++        for (int s = 0; s < NS; ++s) { float w = sc[s] / den * inv[s]; for (int e = 0; e < E; ++e) o[e] += w * v[s][e]; }
++        if constexpr (NORM) {
++            float a = 0; for (int e = 0; e < E; ++e) a += o[e] * o[e];
++            threadgroup float r2[NSG]; threadgroup float t2;
++            float r = simd_sum(a); if (lane == 0) r2[sg] = r;
++            threadgroup_barrier(mem_flags::mem_threadgroup);
++            if (lid == 0) { float b = 0; for (int g = 0; g < NSG; ++g) b += r2[g]; t2 = b; }
++            threadgroup_barrier(mem_flags::mem_threadgroup);
++            float n = metal::precise::rsqrt(t2 / D + eps[0]);
++            for (int e = 0; e < E; ++e) {
++                int j = lid + e * TG;
++                out[(row * Q + q) * D + j] = static_cast<bfloat16_t>(o[e] * n * float(nw[j]));
++            }
++        } else {
++            for (int e = 0; e < E; ++e) out[(row * Q + q) * D + lid + e * TG] = o[e];
++        }
++    }
++"""
++def _ar_kernel(norm):
++    key = ("ar", norm)
++    if key not in _K:
++        names = [f"s{i}" for i in range(8)] + ["query", "scale", "nw", "eps"]
++        _K[key] = mx.fast.metal_kernel(
++            name="attnres_rows_norm" if norm else "attnres_rows",
++            input_names=names, output_names=["out"], source=_AR_SRC)
++    return _K[key]
++def attnres_rows(arrays, query, scale, norm_w=None, eps=1e-6):
++    """arrays: 1..8 states each (..., D) same rows, f32/bf16; query (Q, D) or (D,) f32.
++    Returns (rows, Q, D) f32, or bf16 rms_norm(out)*norm_w when norm_w given (Q must be 1)."""
++    D = arrays[-1].shape[-1]
++    rows = arrays[-1].size // D
++    q = query.reshape(-1, D).astype(mx.float32)
++    Q = q.shape[0]
++    TG = 256
++    assert D % TG == 0
++    ns = len(arrays)
++    flat = [a.reshape(rows, D) for a in arrays]
++    flat += [flat[0]] * (8 - ns)
++    norm = norm_w is not None
++    nw = norm_w if norm else mx.zeros((1,), mx.bfloat16)
++    out = _ar_kernel(norm)(
++        inputs=[*flat, q, mx.array([scale], mx.float32), nw, mx.array([eps], mx.float32)],
++        template=[("NS", ns), ("Q", Q), ("D", D), ("TG", TG), ("E", D // TG), ("NORM", int(norm))],
++        grid=(TG, rows, 1), threadgroup=(TG, 1, 1),
++        output_shapes=[(rows, Q, D)], output_dtypes=[mx.bfloat16 if norm else mx.float32])[0]
++    return out
++
++# ---- message gate, many rows (prefill) ----
++_NC_SRC = r"""
++    // one threadgroup per row: out[row] = bf16(cat(rms(h[row]), rms(m[row])))
++    const uint lid = thread_position_in_threadgroup.x;
++    const uint lane = thread_index_in_simdgroup;
++    const uint sg = simdgroup_index_in_threadgroup;
++    const size_t row = threadgroup_position_in_grid.y;
++    constexpr int NSG = TG / 32;
++    float hv[E], mv[E]; float a = 0, b = 0;
++    for (int e = 0; e < E; ++e) { hv[e] = float(h[row * D + lid + e * TG]); mv[e] = float(m[row * D + lid + e * TG]); a += hv[e]*hv[e]; b += mv[e]*mv[e]; }
++    threadgroup float ra[NSG], rb[NSG];
++    a = simd_sum(a); b = simd_sum(b);
++    if (lane == 0) { ra[sg] = a; rb[sg] = b; }
++    threadgroup_barrier(mem_flags::mem_threadgroup);
++    float ta = 0, tb = 0; for (int g = 0; g < NSG; ++g) { ta += ra[g]; tb += rb[g]; }
++    float ia = metal::precise::rsqrt(ta / D + eps[0]), ib = metal::precise::rsqrt(tb / D + eps[0]);
++    for (int e = 0; e < E; ++e) {
++        out[row * 2 * D + lid + e * TG] = static_cast<bfloat16_t>(hv[e] * ia);
++        out[row * 2 * D + D + lid + e * TG] = static_cast<bfloat16_t>(mv[e] * ib);
++    }
++"""
++def norm_cat_bf16(h, m, eps):
++    D = h.shape[-1]; rows = h.size // D; TG = 256
++    if "nc" not in _K:
++        _K["nc"] = mx.fast.metal_kernel(name="msg_norm_cat", input_names=["h", "m", "eps"], output_names=["out"], source=_NC_SRC)
++    return _K["nc"](inputs=[h.reshape(rows, D), m.reshape(rows, D), mx.array([eps], mx.float32)],
++        template=[("D", D), ("TG", TG), ("E", D // TG)], grid=(TG, rows, 1), threadgroup=(TG, 1, 1),
++        output_shapes=[(rows, 2 * D)], output_dtypes=[mx.bfloat16])[0]
++@mx.compile
++def _mg_combine(fg, h, m):
++    D = h.shape[-1]
++    f = mx.tanh(fg[..., :D]); g = mx.tanh(fg[..., D:])
++    return (1 - f) * h.astype(mx.float32) + g * m.astype(mx.float32)
++def message_gate_rows(gate, hidden, message):
++    """MessageGate.__call__ for many rows; forget/gain as one FP32 matmul."""
++    shp = hidden.shape
++    gi = norm_cat_bf16(hidden, message, gate.eps)
++    gi = gi @ gate.down_proj.weight.T
++    wfg = gate.__dict__.get("_wfg")
++    if wfg is None:
++        wfg = mx.concatenate([gate.forget_gate_proj.weight, gate.message_gate_proj.weight], axis=0).astype(mx.float32)
++        mx.eval(wfg); gate.__dict__["_wfg"] = wfg
++    fg = gi.astype(mx.float32) @ wfg.T
++    D = shp[-1]
++    return _mg_combine(fg, hidden.reshape(-1, D), message.reshape(-1, D)).reshape(shp)
++
++
++def _on(k): return os.environ.get(k, "1") == "1"
++# Bit-identical to the fork (on by default): MoE combine, short conv, l2 clip.
++# Not bit-identical (opt-in): attention residuals (PF_AR=1, top-1 98.5%), message gates (PF_MG=1, top-1 99.6%).
++_AR = os.environ.get("PF_AR", "0") == "1"
++_MG = os.environ.get("PF_MG", "0") == "1"
++_MOE = _on("PF_MOE")
++
++def _rows(x): return x.size // x.shape[-1]
++
++def _ar_ok(arrays, d, normalize_values):
++    return (normalize_values and 1 <= len(arrays) <= 8 and d % 256 == 0 and _rows(arrays[-1]) > 1
++            and all(a.shape == arrays[-1].shape and a.dtype in (mx.float32, mx.bfloat16) for a in arrays))
++
++_orig_normed = L.AttentionResidual.normed
++def normed(self, blocks, partial, norm, dtype):
++    arrays = [*blocks, partial]; d = partial.shape[-1]
++    if (_AR and self.query.ndim == 1 and type(norm) is L.nn.RMSNorm and dtype == mx.bfloat16
++            and norm.weight.dtype == mx.bfloat16 and _ar_ok(arrays, d, self.normalize_values)):
++        out = attnres_rows(arrays, self.query, d ** -0.5, norm.weight, norm.eps)
++        return out.reshape(*partial.shape[:-1], d)
++    return _orig_normed(self, blocks, partial, norm, dtype)
++
++_orig_ar_call = L.AttentionResidual.__call__
++def ar_call(self, blocks, partial):
++    arrays = [*blocks, partial]; d = partial.shape[-1]
++    if _AR and self.query.ndim in (1, 2) and _ar_ok(arrays, d, self.normalize_values):
++        q = self.query.reshape(-1, d)
++        if q.shape[0] <= 4:
++            out = attnres_rows(arrays, q, d ** -0.5)
++            return out.reshape(*partial.shape[:-1], q.shape[0], d)
++    return _orig_ar_call(self, blocks, partial)
++
++_orig_mar_call = None
++def mar_call(self, blocks, partial, loop_layer_idx):
++    arrays = [*blocks, partial]; d = partial.shape[-1]
++    if _AR and _ar_ok(arrays, d, self.normalize_values) and self.query.shape[1] <= 4:
++        q = self.query[loop_layer_idx]
++        out = attnres_rows(arrays, q, d ** -0.5)
++        return out.reshape(*partial.shape[:-1], q.shape[0], d)
++    return _orig_mar_call(self, blocks, partial, loop_layer_idx)
++
++_orig_mg_call = None
++def mg_call(self, hidden, message):
++    if (_MG and _rows(hidden) > 1 and hidden.shape == message.shape and hidden.shape[-1] % 256 == 0
++            and "bias" not in self.down_proj and "bias" not in self.forget_gate_proj
++            and "bias" not in self.message_gate_proj and type(self.down_proj) is L.nn.Linear):
++        return message_gate_rows(self, hidden, message)
++    return _orig_mg_call(self, hidden, message)
++
++_orig_moe_call = L.SparseMoE.__call__
++def moe_call(self, x):
++    sw = self.switch_mlp
++    if (_MOE and self.sharding_group is None and not self.training and x.ndim == 3 and x.shape[1] > 8
++            and x.dtype == mx.bfloat16 and getattr(sw.gate_proj, "num_experts", -1) == sw.num_experts
++            and type(sw) is S.SwitchGLU):
++        indices, weights = L._route(x, self.gate_weight, self.e_score_correction_bias, self.top_k, self.route_scale)
++        if indices.size >= 64:
++            xx = mx.expand_dims(x, (-2, -3))
++            xs, ii, inv = S._gather_sort(xx, indices)
++            up = sw.up_proj(xs, ii, sorted_indices=True)
++            gate = sw.gate_proj(xs, ii, sorted_indices=True)
++            y = sw.down_proj(sw.activation(up, gate), ii, sorted_indices=True)
++            d = y.shape[-1]
++            out = moe_unsort_combine(y.reshape(-1, d), inv.astype(mx.uint32),
++                                        weights.reshape(-1, weights.shape[-1]).astype(mx.float32))
++            return out.reshape(*x.shape[:-1], d)
++    return _orig_moe_call(self, x)
++
++_SC = _on("PF_SC"); _L2 = _on("PF_L2")
++_orig_sc_call = L.ShortConvolution.__call__
++def sc_call(self, x, cache=None, mask=None):
++    if (_SC and mask is None and not self.training and x.ndim == 3 and x.shape[1] > 8
++            and x.dtype == mx.bfloat16 and self.kernel_size == 4 and x.shape[-1] % 128 == 0):
++        state = cache[self.conv_idx] if cache is not None else None
++        if state is None:
++            state = mx.zeros((x.shape[0], self.kernel_size - 1, x.shape[-1]))
++        if state.dtype == mx.float32 and not getattr(cache, "is_speculating", False):
++            from .kernels import short_convolution
++            L._update_conv_cache(cache, self.conv_idx, state, x.astype(mx.float32), None)
++            return short_convolution(state, self.conv.weight, x, None, self.kernel_size)
++    return _orig_sc_call(self, x, cache, mask)
++
++@mx.compile
++def _l2_noscale(x, threshold):
++    return L.l2_clip(x, threshold)
++@mx.compile
++def _l2_scale(x, threshold, scale):
++    return L.l2_clip(x, threshold, scale)
++_orig_l2 = L._l2_clip
++def l2(x, threshold, scale=None):
++    if _L2 and x.ndim == 4 and x.shape[0] * x.shape[1] > 8:
++        t = mx.array(threshold, mx.float32)
++        return _l2_noscale(x, t) if scale is None else _l2_scale(x, t, scale)
++    return _orig_l2(x, threshold, scale)
++
++_PJ = os.environ.get("PF_PJ", "0") == "1"  # merged projections: not bit-exact across row counts (top-1 98.46% alone)
++_PJ_NAMES = ("q_proj", "r_proj", "gate_proj", "k_proj", "v_proj")
++_orig_dp = L.Attention._decode_projections
++def dp(self, x, key_input, value_input):
++    if (_PJ and x.ndim == 3 and x.shape[0] * x.shape[1] > 8 and self.sharding_group is None
++            and all(n in self and type(self[n]) is L.nn.Linear and "bias" not in self[n] for n in _PJ_NAMES)):
++        sizes = self.__dict__.get("_pf_sizes")
++        if sizes is None:
++            # One row-stacked weight; each projection's weight becomes a view of its rows.
++            ws = [self[n].weight for n in _PJ_NAMES]
++            if len({w.dtype for w in ws}) != 1 or len({w.shape[1] for w in ws}) != 1:
++                return _orig_dp(self, x, key_input, value_input)
++            W = mx.concatenate(ws, axis=0); mx.eval(W)
++            sizes, o = [], 0
++            for n, w in zip(_PJ_NAMES, ws):
++                sizes.append((o, o + w.shape[0])); o += w.shape[0]
++            for n, (a, b) in zip(_PJ_NAMES, sizes):
++                self[n].weight = W[a:b]
++            self.__dict__["_pf_w"] = W; self.__dict__["_pf_sizes"] = sizes
++        W = self.__dict__["_pf_w"]
++        (q0, q1), (r0, r1), (g0, g1), (k0, k1), (v0, v1) = sizes
++        if key_input is x and value_input is x:
++            y = x @ W.T
++            return y[..., q0:q1], y[..., k0:k1], y[..., v0:v1], y[..., r0:r1], y[..., g0:g1]
++        y = x @ W[q0:g1].T
++        k = key_input @ W[k0:k1].T
++        v = value_input @ W[v0:v1].T
++        return y[..., :q1 - q0], k, v, y[..., r0 - q0:r1 - q0], y[..., g0 - q0:g1 - q0]
++    return _orig_dp(self, x, key_input, value_input)
++
++
++def install():
++    global _orig_mar_call, _orig_mg_call
++    from ..inkling2_loop import language as LL
++    if getattr(L, "_prefill_fused_installed", False):
++        return
++    L._prefill_fused_installed = True
++    _orig_mar_call = LL.MessageAttentionResidual.__call__
++    _orig_mg_call = LL.MessageGate.__call__
++    L.AttentionResidual.normed = normed
++    L.AttentionResidual.__call__ = ar_call
++    LL.MessageAttentionResidual.__call__ = mar_call
++    LL.MessageGate.__call__ = mg_call
++    L.SparseMoE.__call__ = moe_call
++    L.ShortConvolution.__call__ = sc_call
++    L._l2_clip = l2
++    L.Attention._decode_projections = dp
+diff -ruN a/mlx_vlm/models/inkling2_loop/language.py b/mlx_vlm/models/inkling2_loop/language.py
+--- a/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 15:45:30.500387889 +0100
++++ b/mlx_vlm/models/inkling2_loop/language.py	2026-11-22 15:45:57.440407801 +0100
+@@ -376,3 +376,10 @@
+             ),
+             ArraysCache(4),
+         )
++
++
++if _os.environ.get("MLX_VLM_INKLING2_PREFILL_FUSED", "0") == "1":
++    # Prefill-only fused paths (relaxed quality gate; see prefill_fused.py).
++    from ..inkling2 import prefill_fused as _prefill_fused
++
++    _prefill_fused.install()

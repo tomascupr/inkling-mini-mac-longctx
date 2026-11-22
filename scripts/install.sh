@@ -31,6 +31,8 @@ if [ "${DSPARK:-0}" != 1 ]; then
     # Long-context reading: env MLX_VLM_RELATIVE_ATTN_KTILES=3 and MLX_VLM_EXACT_HOST_VOCAB=1 (bit-identical).
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0008-kt3-attention-tiles.patch")
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0009-host-vocab-prefill.patch")
+    # Short-context reading: env MLX_VLM_INKLING2_PREFILL_FUSED=1 (bit-identical parts on; PF_AR/PF_MG opt-in, not bit-identical).
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0010-prefill-fused.patch")
 fi
 if [ "${PREFIX:-0}" = 1 ] && [ "${DSPARK:-0}" = 1 ]; then
     echo "PREFIX=1 and DSPARK=1 cannot be combined yet" >&2; exit 1
@@ -54,4 +56,4 @@ for v in base stacked; do
     PYTHONPATH="$ROOT/src/$v" "$ROOT/venv/bin/python" -c \
         "import mlx.core as mx, mlx_vlm; print('$v', mlx_vlm.__version__, mlx_vlm.__file__, 'mlx', mx.__version__)"
 done
-echo "Recommended run env: MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2 MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1 PYTHONPATH=$ROOT/src/stacked"
+echo "Recommended run env: MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2 MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1 MLX_VLM_INKLING2_PREFILL_FUSED=1 PYTHONPATH=$ROOT/src/stacked"
