@@ -27,7 +27,7 @@ Measured on one M4 Max 64 GB (our second test Mac; MLX-Serve's own server-log nu
 Reading rows: prefill step 4096 (the reference fork's own chunking option, which passes our quality gate); at step
 2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head gives
 the same tokens as writing without it. The 4k writing rows use opt-in `MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024` (patch
-0011: same tokens as the reference fork on this run, not bit-identical log-probabilities; quality gate in progress). Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
+0011: on the fixed 8-prompt quality set its answers are identical to the reference fork's, 8/8; log-probabilities are not bit-identical). Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
 
 ### Before → after (standard build → this repo)
 

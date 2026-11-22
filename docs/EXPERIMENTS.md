@@ -6,6 +6,21 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **17:15–17:30 — 0010 was not bit-identical on short chunks; fixed (shape gate).** The 8-prompt quality set
+  (greedy 64 tokens + teacher-forced top-1, prompts of 36–14,692 tokens, step 2048) showed stack13 + 0010 at 4/8
+  greedy-identical and 99.04% teacher-forced top-1, while the same tree without `PREFILL_FUSED` was 8/8 / 100%
+  (stack12 + 0010: same 4/8, so 0010 itself). Per-part logit diff at 36 / 100 / 151 / 645 / 2048-row chunks: only
+  the attention-residual kernels differed, and not at 2048. Cause: the fork's scores are one `(rows × states, D) @
+  (D, q)` product and MLX picks its reduction order by shape — gemv's bn=8 split when D ≥ 16·M (one query) and
+  steel split-K when D ≥ M (2–4 queries). The 4k/32k sha runs only had ≥2030-row chunks. Fix: the exact kernels
+  serve only the shapes whose order they reproduce; the rest keep the fork's path. After: logits equal at all
+  chunk sizes tested (36–2048), 8/8 greedy-identical and 100% teacher-forced on the prompt set. Reading is
+  unchanged (4k/32k chunks are all ≥4078 rows). Patch 0011 (`DECODE_MIN_KEYS=1024`) gave output identical to its
+  control on all 8 prompts, so it adds no divergence. Files: `results/gates/studio2/top1/top1-{s13ctl,s13nof,
+  s12f,mk1024,s13gate}.*`, `iso2.py`, `iso{2,3}.log`.
+- **17:22 — non-exact compiled verify for drafting (`EXACT_VERIFY=0`, `COMPILED_VERIFY=1`), 32k: slower.** k5 26.0 /
+  40.5, k8 46.0 / 47.1 tok/s (exact verify: 67.7 / 59.4), and k5 acceptance moved (69.5% vs 76%: not exact). Every
+  round "missed" the compiled path and fell to the generic verify. Dropped.
 - **17:00–17:15 — short-prompt writing: the first ~18 tokens after a 4k prompt were decoded eagerly (patch 0011).**
   Decode profile on Studio 2 (stack13, 4k needle prompt): the compiled decode step costs 1.5 ms of CPU, `async_eval`
   16.5 ms wall of which 6.7 ms CPU, so the step is GPU-bound at ~18 ms — but 17 of 123 steps returned "not served"

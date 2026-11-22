@@ -1,0 +1,7 @@
+17:22:33 ctx 32768 k 5 step 4096 MLX_VLM_INKLING2_EXACT_VERIFY=0
+fv-32768-k5 dtps 25.98 ptps 914.0 needle True acc 0.6953125 rounds 32 misses 32 ntok 121 
+fv-32768-k5 dtps 40.54 ptps 911.2 needle True acc 0.6953125 rounds 32 misses 64 ntok 121 
+17:23:59 ctx 32768 k 8 step 4096 MLX_VLM_INKLING2_EXACT_VERIFY=0
+fv-32768-k8 dtps 45.98 ptps 887.6 needle True acc 0.5771428571428572 rounds 25 misses 25 ntok 126 
+fv-32768-k8 dtps 47.09 ptps 886.3 needle True acc 0.5771428571428572 rounds 25 misses 50 ntok 126 
+DSDONE

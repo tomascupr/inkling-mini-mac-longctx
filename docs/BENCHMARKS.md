@@ -41,9 +41,9 @@ draft). Ours: `MLX_VLM_INKLING2_PREFILL_FUSED=1` (patch 0010), `scripts/exact_ch
 
 Step 2048 rows: tokens and logprob sha equal to the unpatched fork, needle found (`results/gates/studio2/p10b-*.json`).
 Draft rows: patch 0007 (exact DSpark verify) + 0010, tokens identical to the no-draft run, `results/gates/studio2/draft/`.
-0011 rows: tokens identical to the unpatched fork (4k needle run); fixed-prompt-set gate in progress. Still behind MLX-Serve on no-draft writing and on drafted writing at 32k; work in progress.
+0011 rows: tokens identical to the unpatched fork (4k needle run) and on the fixed 8-prompt set (greedy 8/8, teacher-forced top-1 100% with step 2048; `results/gates/studio2/top1/top1-mk1024.*` vs `top1-s13gate.*`). Still behind MLX-Serve on no-draft writing and on drafted writing at 32k; work in progress.
 Step 4096 changes only the prefill chunking (fork vs itself at step 4096: teacher-forced top-1 99.6% on the fixed
-8-prompt set, needle answers identical); the fused kernels are bit-identical on top of it.
+8-prompt set, needle answers identical); the fused kernels are bit-identical on top of it (since 17:30 also on short chunks: 8/8 greedy, 100% teacher-forced top-1 at step 2048, `top1-s13gate.*`).
 
 **Bit-identical speculative decoding (`0007`, 2026-11-22 11:53–12:08 CET).** `stacked.patch` + `0007-exact-dspark.patch`,
 env `MLX_VLM_INKLING2_INCREMENTAL_DRAFT_PREFILL=1 MLX_VLM_INKLING2_EXACT_VERIFY=1 MLX_VLM_INKLING2_COMPILED_VERIFY=1
