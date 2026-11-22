@@ -15,6 +15,7 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 
 | Context (prompt tokens) | Prefill tok/s | Decode tok/s | Peak MLX GiB | Stock prefill / decode / peak | Speed-up (prefill / decode) | Exactness |
 |---|---:|---:|---:|---|---|---|
+| 4k (4,078) | **948.0** | **40.98** | – | 758.4 / 33.09 / 25.58 | 1.25× / 1.24× | not gated at 4k |
 | 32k (32,750) | **863.6** | **39.80** | **22.78** | 667.9 / 27.0 / 28.27 | 1.29× / 1.47× | bit-identical to unpatched code |
 | 131k (131,054) | **623.6** | **31.20** | **25.78** | 401.9 / 16.2 / 33.58 | 1.55× / 1.93× | bit-identical to unpatched code |
 | 262k (262,126), default env | **448.7** | **23.86** | **33.06** | 256.4 / 10.7 / 35.38 | 1.75× / 2.23× | needle found (no 262k unpatched reference run) |
@@ -39,6 +40,11 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 Not yet measured with the patches: 524k and 1M. *Estimate:* with the recommended env
 and step 512, a 1M-token context projects to ~50.6 GiB peak against the 51.84 GiB cap
 (32 GiB of bf16 global KV + 17.6 GiB text weights + ~1.0 GiB per-step working memory).
+
+4k row: "before" measured 2026-11-22 02:25 CET (Europe/Prague) on the unmodified standard build with the same
+`bench_longctx.py` and settings as the other baseline runs (bf16 KV, no draft, step 2048, 256 max tokens, needle found;
+`results/runs/stock-v0.2.0-4k-20261122.json`). "After" (948.0 / 40.98) is a single patched run at 4k from our
+optimization log, step 2048; it was not part of the exactness gate.
 
 ## Patches
 

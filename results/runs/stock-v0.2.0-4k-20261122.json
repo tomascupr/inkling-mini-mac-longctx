@@ -1,0 +1,73 @@
+{
+ "started": "2026-11-22T02:25:56",
+ "tz": "Europe/Prague",
+ "model": "~/.exo-inkling-bench/models/thinkingmachines--Inkling-2-Mini",
+ "weights": "thinkingmachines/Inkling-2-Mini rev ed40e7da (NVFP4+MXFP8 as released, loaded natively: mlx nvfp4/mxfp8 modes)",
+ "kv_cache": "bf16 (no kv quantization); SWA layers RotatingKVCache(1024); 8 global visits KVCache",
+ "device_info": {
+  "device_name": "Apple M4 Max",
+  "max_recommended_working_set_size": 55662788608,
+  "memory_size": 68719476736,
+  "architecture": "applegpu_g16s",
+  "max_buffer_length": 41747087360,
+  "resource_limit": 499000
+ },
+ "mem_before_load": {
+  "free_GiB": 32.37,
+  "inactive_GiB": 18.61,
+  "wired_GiB": 3.62,
+  "swap_used_MB": 9.06,
+  "pressure": "1"
+ },
+ "runs": [
+  {
+   "ctx_target": 4096,
+   "dspark": false,
+   "prefill_step_size": 2048,
+   "max_tokens": 256,
+   "started": "2026-11-22T02:25:58",
+   "mem_before": {
+    "free_GiB": 8.93,
+    "inactive_GiB": 19.46,
+    "wired_GiB": 3.64,
+    "swap_used_MB": 9.06,
+    "pressure": "1"
+   },
+   "prompt_tokens_tokenizer": 4078,
+   "elapsed_s": 9.216203416930512,
+   "prompt_tokens": 4078,
+   "prompt_tps": 758.4103955965032,
+   "prefill_s": 5.377036000136286,
+   "generation_tokens": 123,
+   "decode_tps": 33.088903628481226,
+   "peak_mlx_GiB": 25.583675127476454,
+   "cached_tokens": 0,
+   "text": "<|message_model|><|content_thinking|>The user asks: According to the archivist's note in the document above, what is the catalogue code of the Prague observatory archive box? Reply with the code only.\n\nNeed inspect document. It contains an archivist's note: \"An archivist's note: the catalogue code of the Prague observatory archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "finish_reason": "stop",
+   "needle_found": true,
+   "answer_tail": "ry archive box is VIOLET-ANCHOR-4729.\" So answer code only: VIOLET-ANCHOR-4729.\n\nNeed final only code. Ensure no extra.<|end_message|><|message_model|><|content_text|>VIOLET-ANCHOR-4729<|end_message|>",
+   "ok": true,
+   "mem_after": {
+    "free_GiB": 10.38,
+    "inactive_GiB": 19.04,
+    "wired_GiB": 24.3,
+    "swap_used_MB": 9.06,
+    "pressure": "1"
+   },
+   "finished": "2026-11-22T02:26:07"
+  }
+ ],
+ "load_s": 0.9798327921889722,
+ "active_after_load_GiB": 18.185636527836323,
+ "mem_after_load": {
+  "free_GiB": 9.61,
+  "inactive_GiB": 18.61,
+  "wired_GiB": 17.53,
+  "swap_used_MB": 9.06,
+  "pressure": "1"
+ },
+ "corpus_tokens": 1818735,
+ "tokenize_s": 1.2703034589067101,
+ "finished": "2026-11-22T02:26:07",
+ "stack": "internet-projects/inkling2-mlx v0.2.0 (mlx_vlm 0.8.0+inkling2mini.2, mlx 0.32.4), unmodified; bench_longctx.py, bf16 KV, no draft"
+}

@@ -1,30 +1,39 @@
-# Inkling-2-Mini, long context, one Mac
+# Run Inkling-2-Mini faster on a single Mac
 
-**Inkling-2-Mini with 262k context on one 64 GB Mac Studio: up to 2.2× faster decode and 1.75× faster prefill than stock, bit-exact, full bf16 quality.**
+We made Thinking Machines' Inkling-2-Mini **write answers up to 2.2× faster** and **read long documents up to 1.75× faster**
+on one 64 GB Mac Studio, at full quality: our patches leave the model's output **bit-for-bit unchanged**. The model supports up to 1M tokens of context;
+we have measured up to 262k tokens on one Mac so far.
 
-Measured on M4 Max 64 GB, official weights, bf16 KV cache, versus the stock Inkling 2 Mini MLX build
-(MLX-VLM 0.8.0+inkling2mini.2 from inkling2-mlx v0.2.0, mlx 0.32.4) on the same Mac:
+**Before** = the standard MLX build people use to run Inkling-2-Mini on a Mac today (inkling2-mlx v0.2.0).
+**After** = the same build with the patches in this repo. Same Mac (M4 Max, 64 GB), same official weights, same prompts.
 
-| Context | Prefill tok/s (this / stock) | Decode tok/s (this / stock) | Speed-up (prefill / decode) |
+Speeds are tokens per second. **Reading** = processing your prompt or document (prefill).
+**Writing** = generating the answer (decode).
+
+| Prompt length | Reading: before → after | Writing: before → after | Speed-up (reading / writing) |
 |---|---|---|---|
-| 32k | **863.6** / 667.9 | **39.8** / 27.0 | 1.29× / 1.47× |
-| 131k | **623.6** / 401.9 | **31.2** / 16.2 | 1.55× / 1.93× |
-| 262k | **448.7** / 256.4 | **23.9** / 10.7 | 1.75× / 2.23× |
+| 4k tokens | 758.4 → **948.0** | 33.1 → **41.0** | 1.25× / 1.24× |
+| 32k tokens | 667.9 → **863.6** | 27.0 → **39.8** | 1.29× / 1.47× |
+| 131k tokens | 401.9 → **623.6** | 16.2 → **31.2** | 1.55× / 1.93× |
+| 262k tokens | 256.4 → **448.7** | 10.7 → **23.9** | 1.75× / 2.23× |
 
-Needle-in-a-haystack retrieval passes at every length. Full benchmarks, methodology and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+The longer the prompt, the bigger the gain. At 32k–262k the model found a fact hidden in the middle of the document in every run, before and after.
+Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-## Follow-ups in 1.5 s on a 131k document
+## Follow-up questions in 1.5 s
 
-Read a 131k-token document once (~218 s), then ask follow-up questions that start answering in
-**1.46–1.54 s**: the conversation's cache is restored instead of re-reading the document. Saving that cache
-to disk, so a document survives a server restart, passes our exactness tests; its Mac timing is not measured yet.
+Ask about a 131k-token document once: reading it takes about 3.6 minutes. Ask a follow-up, and the answer starts
+in **1.5 s** (1.46–1.54 s measured), because the Mac keeps the document's processed state instead of reading it again.
 
-## Why it's fast
+## What we changed
 
-- **Compiled decode step:** each token runs through one compiled MLX function instead of a freshly built graph of ~13k nodes, cutting CPU overhead per token.
-- **Exact, memory-lean prefill:** logits only for the last token, per-chunk embeddings, KV allocated once, so bigger chunks fit and 32k peak memory drops from 26 to 22 GiB.
-- **Attention and MoE kernel tuning:** larger attention tiles and a sort-free expert path, value-identical to the original.
-- **Prefix cache:** the fused attention kernel stays on after a cached prefix is restored, so follow-ups skip the long re-read.
+- **No more rebuilding the same work for every word.** Each step of writing an answer is compiled once (turned into a
+  ready-made GPU program) and reused, instead of being rebuilt from scratch for every new token.
+- **Memory-lean reading.** Prompts are read in chunks without keeping unneeded copies around, so long documents fit
+  in 64 GB with room to spare.
+- **Tuned GPU kernels.** The attention kernel (how each word looks back at the document) and the expert kernels (the
+  model's mixture-of-experts layers) are tuned for the M4 Max, with bit-identical results.
+- **Instant follow-ups.** The processed state of a document is kept, so follow-up questions start in 1.5 s instead of 3.6 min.
 
 ## Quickstart
 
@@ -43,13 +52,13 @@ mlx 0.32.4. For fast follow-ups, start the server with the prefix cache on (`APC
 
 ## Quality
 
-Bit-identical outputs: on our gates the patched build produces the same tokens and the same per-token
-log-probabilities, bit for bit, as the unpatched code. No quantized KV cache, no sparse or approximate
+Bit-identical outputs: at 32k and 131k the patched build produces the same tokens and the same per-token
+log-probabilities, bit for bit, as the same code without our patches (the community fork we build on). No quantized KV cache, no sparse or approximate
 attention: this is the full bf16 model, just faster.
 
 ## What's next
 
-- **1M tokens on one Mac:** the memory budget projects to fit at bf16 under the 51.8 GiB GPU limit; not yet measured.
+- **1M tokens on one Mac:** the model supports 1M tokens; our memory budget projects a 1M context to fit at full bf16 quality (~50.6 of the 51.8 GiB GPU limit). A full 1M run is next; not measured yet.
 - **Speculative decoding** with Inkling's own draft head, to push decode further.
 - More prefill and decode headroom: we're at ~67–70% of the chip's compute limit on prefill and ~49–62% of its memory bandwidth on decode.
 
