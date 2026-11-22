@@ -1,13 +1,36 @@
-# Run Inkling-2-Mini faster on a single Mac
+# Inkling 2 Mini on a Mac, fast
 
-We made Thinking Machines' Inkling-2-Mini **write answers up to 2.8× faster** and **read long documents up to 1.8× faster**
-on one 64 GB Mac Studio, at full quality: our patches leave the model's output **bit-for-bit unchanged**. The model supports up to 1M tokens of context,
-and we measured it at the full 1M on one Mac (the hidden fact was found; outputs are checked bit-for-bit through 262k).
+**Full quality on the official weights (no requant) · fastest Inkling 2 Mini prompt reading on an M4 Max · 1M-token
+context on a 64 GB Mac.**
 
-**Before** = the standard MLX build people use to run Inkling-2-Mini on a Mac today (inkling2-mlx v0.2.0).
-**After** = this repo: a community fork of that MLX code plus our patches (credits below). Same Mac (M4 Max, 64 GB), same official weights, same prompts.
+Thinking Machines' Inkling-2-Mini, on one Mac Studio (M4 Max, 64 GB): **writing up to 2.8× faster** and **reading up to
+1.8× faster** than the standard MLX build, the full 1M-token context on one machine, and the same answers. No
+re-quantized weights, no FP8 KV cache, no approximate attention.
 
-Speeds are tokens per second. **Reading** = processing your prompt or document (prefill).
+**Before** = inkling2-mlx v0.2.0, the standard MLX build people run today.
+**After** = this repo: the community fork by betizzel (with jundot's attention kernel) plus our patches (credits below).
+Same Mac, same official weights, same prompts.
+
+### Head to head with MLX-Serve (same Mac, same official weights)
+
+Measured on one M4 Max 64 GB (our second test Mac; MLX-Serve's own server-log numbers). Tokens per second.
+
+| | MLX-Serve | This repo | |
+|---|---:|---:|---|
+| Reading, 4k prompt | 1010–1012 | **1013–1037** | **fastest** |
+| Reading, 32k prompt | 877 | **884–888** | **fastest** |
+| Writing, 32k, no draft | 50.2 | 48.9 | on par (−3%) |
+| Writing, 4k, no draft | 56.4 | 52.6 | behind (−7%), in progress |
+| Writing, 4k, draft head | 66.1 | 62.6 | behind (−5%), in progress |
+| Writing, 32k, draft head | 74.8 | 67.7 | behind (−9%), in progress |
+
+Reading rows: prefill step 4096 (the reference fork's own chunking option, which passes our quality gate); at step
+2048 the same build is bit-identical to the reference fork and reads 987 / 872. Writing with the draft head here is
+bit-identical to writing without it. Raw runs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#short-context-vs-mlx-serve-studio-2-second-m4-max-64-gb-2026-11-22).
+
+### Before → after (standard build → this repo)
+
+Measured on our first test Mac (same model of Mac; compare speeds within one table). Speeds are tokens per second. **Reading** = processing your prompt or document (prefill).
 **Writing** = generating the answer (decode).
 
 | Prompt length | Reading: before → after | Writing: before → after | Speed-up (reading / writing) |
@@ -75,6 +98,7 @@ hf download thinkingmachines/Inkling-2-Mini --local-dir ~/inkling-mini/models/In
 
 export PYTHONPATH=~/inkling-mini/src/stacked
 export MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2
+export MLX_VLM_INKLING2_PREFILL_FUSED=1      # bit-identical fused prefill kernels (patch 0010)
 ```
 
 `install.sh` downloads the base code as a zip, applies `patches/stacked.patch` and sets up a venv with
@@ -83,9 +107,15 @@ mlx 0.32.4. For fast follow-ups, start the server with the prefix cache on (`APC
 
 ## Quality
 
-Bit-identical outputs: at 4k, 32k, 131k and 262k the patched build produces the same tokens and the same per-token
-log-probabilities, bit for bit, as the same code without our patches (the community fork we build on). No quantized KV cache, no sparse or approximate
-attention: this is the full bf16 model, just faster.
+- **Official weights**, exactly as Thinking Machines ships them (NVFP4 + MXFP8). No re-quantization, bf16 KV cache,
+  no FP8 KV, no sparse or approximate attention.
+- **Checked against the reference fork:** the default path is bit-identical to the unpatched community fork (same
+  tokens and the same per-token log-probabilities, sha256) at 4k, 32k, 131k and 262k; at 1M the hidden fact is found and
+  outputs match our earlier 1M run bit for bit. The new prefill kernels (attention residuals, message gates, MoE
+  combine) reproduce MLX's own arithmetic order, so they are bit-identical too.
+- **Opt-in options** that are not bit-identical (prefill step 4096, older approximate fusion kernels) must pass our
+  gate: needle found at 32k/131k/1M, the same greedy answers, ≥99% top-1 token agreement with the fork on a fixed prompt
+  set (`scripts/quality/top1.py`).
 
 Standard benchmarks (greedy, same prompts, 2026-11-22): **GSM8K** (first 100) 97% standard build vs **99%** this repo;
 **MMLU-Pro** (140, 10 per subject) 78.6% vs **77.9%**; **RULER needle-in-a-haystack at 32k** (12) 12/12 both. The paired
