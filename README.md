@@ -1,4 +1,4 @@
-# Exact weights. Faster writing.
+# Faster Inkling 2 Mini
 
 **Optimised quality at highest speed.** Inkling 2 Mini with the official weights exactly as shipped, on an M4 Max Mac
 Studio. It writes faster than MLX-Serve at 4k, 32k and 131k and reads faster at 32k and 131k; at 4k, reading is level.
