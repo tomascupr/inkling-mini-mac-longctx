@@ -31,6 +31,31 @@ with a draft model, the same tokens as without it.
   Markov bias per step, ~1.6 GB per round) are most of the confidence wait: proposing from a candidate subset cut it
   5.4 → 1.7 ms, but taking ids < N as the subset dropped acceptance 88% → 71% (this tokenizer's common English words
   sit around ids 149k–156k), 62–64 tok/s. Next: a frequency-ordered candidate list (below).
+- **18:05–18:45 — the server path was not using any of the decode work; fixed (patches 0014, 0015).** End-to-end check
+  of the defaults through `mlx_vlm.server` (Studio 1, its own numbers; client-side decode tok/s, 4k / 32k needle
+  prompts, `--max-num-seqs 1`): the CLI/Python `generate` path on the same Mac does 60.1 / 53.4 without the draft and
+  80.0 / 77.4 with it, but the server did **44.0 / 39.9** without and **31.1 / 29.0** with the draft (prefill also fell
+  to 535–740 / 553 with the draft). Causes: (1) the server's `BatchGenerator` never calls the compiled decode step (it
+  decodes eagerly, one sync per token), (2) with a draft it builds batch caches and runs the continuous-batching
+  speculative state machine, which has no exact verifier, and a multi-token last prompt chunk leaves the sliding
+  windows in concat layout so the verifier's layout check fails every round. Fixes: **0014** — one greedy row on plain
+  caches decodes through `fast_decode.compiled_decode` (the same graph `generate_step` uses): 44.0 → **60.1–60.6** (4k),
+  39.9 → **53.4–53.7** (32k), same text. **0015** — one greedy row with the draft head gets plain caches + the KV
+  reserve, full sliding rings after the prompt, the round loop `_dflash_rounds` (not the batching state machine; the
+  server then serves drafted requests one at a time, `MLX_VLM_INKLING2_SERVER_PLAIN_SPEC=0` restores the old path) and
+  the 1,024–262,144 draft context window: 31.1 → **77.5–81.6** (4k), 29.0 → **74.1–78.8** (32k), prefill back to
+  1040 / 947, same text in every run (all 16 answers hash-equal to the no-draft server's). Intermediate steps: plain
+  caches only 36 / 33; + full rings 35.9 / 33.1; + round loop 77.5–81.6 / 74.1–78.8. Files:
+  `results/gates/studio1/server/`.
+- **18:10–18:40 — 32k drafted, per-round overhead (Studio 2, block 8, τ 0.5, 3 runs per config, tokens identical to
+  the no-draft run in every run).** Round profile (ms): draft build 3.7, confidence wait 4.6, verify build 2.0, verify
+  53.5 + 6.2, commit 0.5 (≈70.7 per round, 5.04 tokens). Compiling the draft head's Markov loop into one graph
+  (`MLX_VLM_INKLING2_DRAFT_COMPILE=1`): draft build 3.6 → 2.5 ms, 71.2 → 71.6–72.6 tok/s. Forcing the full block every
+  round: no change (the DSpark drafter already requests its full block). τ 0.4 67.6–67.9, τ 0.6 71.3–72.2 (with
+  compile). **The draft's two vocabulary-sized reads** (the target's 201k-row head for the block and the folded
+  Markov bias per step, ~1.6 GB per round) are most of the confidence wait: proposing from a candidate subset cut it
+  5.4 → 1.7 ms, but taking ids < N as the subset dropped acceptance 88% → 71% (this tokenizer's common English words
+  sit around ids 149k–156k), 62–64 tok/s. Next: a frequency-ordered candidate list (below).
 - **17:25–17:55 — draft-confidence verify cut (patch 0012) and draft head on by default.** The draft head returns
   each proposal's softmax probability; the round verifies only up to the first position where the cumulative
   probability drops below τ (exact verifier, so tokens are unchanged). Studio 2, 32k, block 8: τ 0.3 66.9 / 0.5

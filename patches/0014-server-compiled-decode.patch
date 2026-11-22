@@ -1,6 +1,6 @@
 diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
 --- a/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.417813605 +0100
-+++ b/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.741814416 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 18:53:15.491643307 +0100
 @@ -1334,6 +1334,26 @@
          elif len(self.token_context) > len(self.uids):
              self.token_context = self.token_context[: len(self.uids)]
@@ -39,3 +39,12 @@ diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
          if sampled is not None:
              self._next_tokens = sampled
              self._next_lps = None
+@@ -2261,6 +2283,8 @@
+             and hasattr(model, "make_cache")
+         ):
+             self.prompt_cache = cache.make_prompt_cache(model)
++            _mt = max_tokens if isinstance(max_tokens, int) else max(max_tokens or [0])
++            _exact_reserve_kv(self.prompt_cache, max_length + int(_mt or 0) + 1)
+         else:
+             self.prompt_cache = _make_cache(
+                 model,

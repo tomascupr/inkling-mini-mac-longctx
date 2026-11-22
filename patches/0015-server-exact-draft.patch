@@ -1,6 +1,6 @@
 diff -ruN b/mlx_vlm/generate/ar.py c/mlx_vlm/generate/ar.py
---- b/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.741814416 +0100
-+++ c/mlx_vlm/generate/ar.py	2026-11-22 18:39:24.861814717 +0100
+--- b/mlx_vlm/generate/ar.py	2026-11-22 18:53:15.491643307 +0100
++++ c/mlx_vlm/generate/ar.py	2026-11-22 18:53:15.503643331 +0100
 @@ -233,6 +233,29 @@
      return host_embed, restore
  
@@ -64,7 +64,7 @@ diff -ruN b/mlx_vlm/generate/ar.py c/mlx_vlm/generate/ar.py
          elif draft_model is not None and draft_kind is not None:
              self.prompt_cache = make_speculative_prompt_cache(
                  model,
-@@ -2720,6 +2762,8 @@
+@@ -2722,6 +2764,8 @@
                      self._suffix_lens,
                  )
  
@@ -73,7 +73,7 @@ diff -ruN b/mlx_vlm/generate/ar.py c/mlx_vlm/generate/ar.py
          if self.draft_model is not None and self.draft_kind is not None:
              gen_batch = SpeculativeGenerationBatch(
                  model=self.model,
-@@ -2741,6 +2785,8 @@
+@@ -2743,6 +2787,8 @@
                  greedy_sampling=self.greedy_sampling,
                  thinking_budget_criteria=list(self.thinking_budget_criteria),
              )
