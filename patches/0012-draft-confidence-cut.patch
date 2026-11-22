@@ -1,0 +1,93 @@
+diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py	2026-11-22 17:43:33.123592281 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 17:44:17.179653022 +0100
+@@ -430,6 +430,22 @@
+             max_kv_size=max_kv_size,
+         )
+ 
++    # Inkling 2 draft-head context window (MLX_VLM_INKLING2_DRAFT_{MIN,MAX}_CTX):
++    # outside it the request decodes without the draft (measured faster inside;
++    # memory-tight or unmeasured outside). Outputs are the same either way.
++    if draft_model is not None and input_ids is not None:
++        _ctx = int(input_ids.shape[-1])
++        for _c in prompt_cache or []:
++            _c = getattr(_c, "caches", [_c])[0]
++            _ctx_off = getattr(_c, "offset", 0)
++            if isinstance(_ctx_off, int):
++                _ctx += _ctx_off
++                break
++        _lo = int(os.environ.get("MLX_VLM_INKLING2_DRAFT_MIN_CTX", "0"))
++        _hi = int(os.environ.get("MLX_VLM_INKLING2_DRAFT_MAX_CTX", "0"))
++        if _ctx < _lo or (_hi > 0 and _ctx > _hi):
++            draft_model = None
++
+     # Speculative decoding setup
+     last_outputs = None
+     speculative_prefill = SpeculativePrefill(draft_kind, draft_model, model)
+diff -ruN a/mlx_vlm/speculative/dflash.py b/mlx_vlm/speculative/dflash.py
+--- a/mlx_vlm/speculative/dflash.py	2026-11-22 17:43:33.111592264 +0100
++++ b/mlx_vlm/speculative/dflash.py	2026-11-22 17:43:46.807611112 +0100
+@@ -711,6 +711,8 @@
+ 
+     if __import__("os").environ.get("MLX_VLM_INKLING2_ROUND_PROFILE", "0") == "1":
+         draft_model.__dict__["_round_profile"] = {}
++    _conf_tau = float(__import__("os").environ.get("MLX_VLM_INKLING2_DRAFT_CONF", "0"))
++    _conf_min = int(__import__("os").environ.get("MLX_VLM_INKLING2_DRAFT_CONF_MIN", "1"))
+     while emitted < max_tokens:
+         _t_round = _time.perf_counter()
+         bs = _dflash_next_block_size(
+@@ -761,6 +763,19 @@
+         if _prof is not None:
+             mx.eval(draft_tokens)
+             _prof.setdefault("draft", []).append(_time.perf_counter() - _t_round)
++        if _conf_tau > 0 and lookup is None:
++            _cf = draft_model.__dict__.pop("_conf", None)
++            if _cf is not None:
++                keep, pr = 0, 1.0
++                for v in _cf.tolist():
++                    pr *= v
++                    if pr < _conf_tau:
++                        break
++                    keep += 1
++                keep = max(keep, _conf_min)
++                if keep < bs - 1:
++                    draft_tokens = draft_tokens[:, :keep]
++                    bs = keep + 1
+         if lookup is not None:
+             cand = cand[: bs - 1] if cand else None
+             if cand:
+diff -ruN a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
+--- a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 17:43:33.111592264 +0100
++++ b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 17:43:46.807611112 +0100
+@@ -42,6 +42,10 @@
+ _CTX_WINDOW = int(os.environ.get("MLX_VLM_INKLING2_DRAFT_CTX_WINDOW", "0"))
+ 
+ 
++import os as _os
++_CONF_ON = float(_os.environ.get("MLX_VLM_INKLING2_DRAFT_CONF", "0")) > 0
++
++
+ class DraftWindowCache(KVCache):
+     def __init__(self, window, block):
+         super().__init__()
+@@ -599,6 +603,8 @@
+         context = self.markov_head.context(x, f_rnn)
+         state = mx.zeros((anchor.size, self.config.markov_rank), x.dtype)
+         previous, tokens = anchor, []
++        _conf = _CONF_ON and anchor.size == 1
++        confs = []
+         for i in range(count):
+             state, bias = self.markov_head.step(state, previous, context[:, i])
+             logits = base[:, i] + bias
+@@ -608,5 +614,11 @@
+                     x.dtype
+                 )
+             previous = sampler(logits[:, : self.config.unpadded_vocab_size]).reshape(-1)
++            if _conf:
++                # Draft confidence = the proposal's softmax probability (cuts the verify block only).
++                lf = logits[:, : self.config.unpadded_vocab_size].astype(mx.float32)
++                confs.append(1.0 / mx.exp(lf - lf.max(axis=-1, keepdims=True)).sum(axis=-1))
+             tokens.append(previous[:, None])
++        if _conf:
++            self.__dict__["_conf"] = mx.concatenate(confs)
+         return mx.concatenate(tokens, axis=1).astype(token_dtype)

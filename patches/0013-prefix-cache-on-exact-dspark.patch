@@ -1,0 +1,698 @@
+diff -ruN a/mlx_vlm/apc.py b/mlx_vlm/apc.py
+--- a/mlx_vlm/apc.py	2026-11-22 17:43:46.747611030 +0100
++++ b/mlx_vlm/apc.py	2026-11-22 17:44:30.047670825 +0100
+@@ -3117,6 +3117,11 @@
+         self.exact_cache_min_tokens = max(
+             1, int(os.environ.get("APC_EXACT_MIN_TOKENS", "16"))
+         )
++        # Opt-in: a checkpoint that extends resident ones (the same conversation's
++        # earlier turns) evicts them. With several entries the default keeps them
++        # for an edited or regenerated last message; an agent's conversation only
++        # grows, and they cost a whole cache each.
++        self.evict_superseded = os.environ.get("APC_EVICT_SUPERSEDED", "0") == "1"
+         self.checkpoint_interval_tokens = max(
+             0,
+             int(
+@@ -3286,12 +3291,24 @@
+             min(limits) if limits else self.memory_max_bytes + self.memory_reserve_bytes
+         )
+ 
+-    def _make_room(self, allocation_bytes: int = 0, *, retain_bytes: int = 0) -> bool:
+-        """Evict idle APC state before allocating; never alter leased blocks."""
++    def _make_room(
++        self,
++        allocation_bytes: int = 0,
++        *,
++        retain_bytes: int = 0,
++        prefill_reserve: bool = True,
++    ) -> bool:
++        """Evict idle APC state before allocating; never alter leased blocks.
++
++        ``prefill_reserve=False`` leaves the next prefill's reserve out: for a
++        snapshot that replaces a resident checkpoint, whose next request makes
++        room for its own prefill (``prepare_prefill``) before allocating.
++        """
++        prefill = self._prefill_reserve_bytes if prefill_reserve else 0
+         required = self.memory_reserve_bytes + (
+-            self._prefill_reserve_bytes + allocation_bytes
++            prefill + allocation_bytes
+             if retain_bytes
+-            else max(self._prefill_reserve_bytes, allocation_bytes)
++            else max(prefill, allocation_bytes)
+         )
+         with self.lock:
+             resident = self._resident_bytes_locked()
+@@ -3332,6 +3349,20 @@
+             and self._memory_headroom() >= required
+         )
+ 
++    def extends_resident_checkpoint(
++        self, token_ids: Sequence[int], extra_hash: int = 0
++    ) -> bool:
++        """True if a resident exact checkpoint is a strict prefix of
++        ``token_ids``: a snapshot of them continues and replaces it."""
++        tokens = tuple(int(t) for t in token_ids)
++        with self.lock:
++            return any(
++                entry.extra_hash == extra_hash
++                and len(entry.token_ids) < len(tokens)
++                and tokens[: len(entry.token_ids)] == entry.token_ids
++                for entry in self._exact_cache.values()
++            )
++
+     def prepare_prefill(self, reserve_bytes: int) -> bool:
+         """Enforce the coordinator's byte budget before new allocations."""
+         if self.disk is not None:
+@@ -3590,8 +3621,14 @@
+         prompt_cache: Sequence[Any],
+         *,
+         extra_hash: int = 0,
++        continues: Optional[bool] = None,
+     ) -> bool:
+-        """Store a full prompt-cache snapshot for exact-prefix reuse."""
++        """Store a full prompt-cache snapshot for exact-prefix reuse.
++
++        ``continues``: whether the snapshot extends a resident checkpoint (see
++        ``extends_resident_checkpoint``); computed here when not given. Callers
++        that may evict before storing must decide it first.
++        """
+         if len(token_ids) < self.exact_cache_min_tokens:
+             return False
+         if (self._exact_cache_max <= 0 and self.disk is None) or not token_ids:
+@@ -3601,14 +3638,37 @@
+         self._prefill_reserve_bytes = self.memory_plan.observe_cache(
+             prompt_cache, len(token_tuple), live_bytes=size
+         )
++        if continues is None:
++            continues = self.extends_resident_checkpoint(token_tuple, extra_hash)
+         if self.disk is not None:
+             self.disk.flush()
++        # A continuation replaces the checkpoint it extends, and the next
++        # request makes room for its own prefill before allocating: don't also
++        # hold that reserve now. With it, a 27B conversation at ~100K tokens
++        # needed 7.8 GB to replace its 2.9 GB checkpoint with ~7 GB free, so
++        # every second turn re-read the whole conversation.
+         retain = (
+             self._exact_cache_max > 0
+             and size <= self.memory_max_bytes
+-            and self._make_room(size, retain_bytes=size)
++            and self._make_room(
++                size, retain_bytes=size, prefill_reserve=not continues
++            )
+         )
+         if not retain:
++            apc_trace(
++                "store",
++                mode="exact",
++                ok=False,
++                reason="memory",
++                token_len=len(token_tuple),
++                continues=continues,
++                size_mb=size >> 20,
++                headroom_mb=self._memory_headroom() >> 20,
++                reserve_mb=self.memory_reserve_bytes >> 20,
++                prefill_reserve_mb=self._prefill_reserve_bytes >> 20,
++                resident_mb=self.resident_bytes() >> 20,
++                max_mb=self.memory_max_bytes >> 20,
++            )
+             self._make_room()
+             with self.lock:
+                 self.stats.memory_skips += 1
+@@ -3647,6 +3707,20 @@
+         stored = False
+         with self.lock:
+             if self._exact_cache_max > 0:
++                if continues and self.evict_superseded:
++                    # The checkpoints this one extends are the same conversation's
++                    # earlier turns. With room for several entries they would stay
++                    # beside it, a whole cache each, and push out what the extra
++                    # entries are for (an agent's side request; Inkling at 30K:
++                    # +2 GB). Only an edited or regenerated last message reuses them.
++                    for old in [
++                        k
++                        for k, e in self._exact_cache.items()
++                        if e.extra_hash == int(extra_hash)
++                        and len(e.token_ids) < len(token_tuple)
++                        and token_tuple[: len(e.token_ids)] == e.token_ids
++                    ]:
++                        del self._exact_cache[old]
+                 self._exact_cache[key] = APCExactCacheEntry(
+                     token_ids=token_tuple,
+                     extra_hash=int(extra_hash),
+diff -ruN a/mlx_vlm/apc_coordinator.py b/mlx_vlm/apc_coordinator.py
+--- a/mlx_vlm/apc_coordinator.py	2026-11-22 17:43:46.747611030 +0100
++++ b/mlx_vlm/apc_coordinator.py	2026-11-22 17:44:30.047670825 +0100
+@@ -404,15 +404,31 @@
+         from .apc import (
+             _cache_nbytes,
+             _prompt_cache_is_batch_shaped,
++            apc_trace,
+             snapshot_prompt_cache_row,
+         )
+ 
++        # Decide before making room evicts the checkpoint this one continues.
++        continues = self.manager.extends_resident_checkpoint(token_ids, extra_hash)
+         # Batch extraction can itself allocate a full row before store_exact_cache
+         # decides whether it can afford another retained snapshot.
+         if _prompt_cache_is_batch_shaped(prompt_cache):
+             if self.manager.disk is not None:
+                 self.manager.disk.flush()
+-            if not self.manager._make_room(_cache_nbytes(prompt_cache)):
++            if not self.manager._make_room(
++                _cache_nbytes(prompt_cache), prefill_reserve=not continues
++            ):
++                apc_trace(
++                    "store",
++                    mode="exact",
++                    ok=False,
++                    reason="room-before-snapshot",
++                    token_len=len(token_ids),
++                    continues=continues,
++                    size_mb=_cache_nbytes(prompt_cache) >> 20,
++                    headroom_mb=self.manager._memory_headroom() >> 20,
++                    resident_mb=self.manager.resident_bytes() >> 20,
++                )
+                 with self.manager.lock:
+                     self.manager.stats.memory_skips += 1
+                 return False
+@@ -420,7 +436,7 @@
+         if snapshot is None:
+             return False
+         return self.manager.store_exact_cache(
+-            token_ids, snapshot, extra_hash=extra_hash
++            token_ids, snapshot, extra_hash=extra_hash, continues=continues
+         )
+ 
+     def commit(
+diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/language.py
+--- a/mlx_vlm/models/inkling2/language.py	2026-11-22 17:43:46.775611068 +0100
++++ b/mlx_vlm/models/inkling2/language.py	2026-11-22 17:44:47.039694372 +0100
+@@ -165,6 +165,15 @@
+     return a
+ 
+ 
++def _prefill_kernel(q, k, v):
++    """Whether a prefill chunk runs the relative-attention Metal kernel."""
++    return (
++        q.dtype == k.dtype == v.dtype == mx.bfloat16
++        and mx.metal.is_available()
++        and mx.default_device() == mx.gpu
++    )
++
++
+ @mx.compile
+ def l2_clip(x, threshold, scale=None):
+     dtype = x.dtype
+@@ -932,15 +941,13 @@
+                 scale=self.head_dim**-0.5,
+                 length=valid_length,
+             ).transpose(0, 2, 1, 3)
+-        if (
+-            padding is None
+-            and q.dtype == k.dtype == v.dtype == mx.bfloat16
+-            and mx.metal.is_available()
+-            and mx.default_device() == mx.gpu
+-        ):
++        if _prefill_kernel(q, k, v):
+             # Flash attention with the relative bias and the sink computed in
+             # the kernel: no [heads, queries, keys] mask and no K/V copies.
+-            # Prefill chunks and speculative verify blocks both take it.
++            # Prefill chunks and speculative verify blocks both take it, and so
++            # do the server's batch caches, whose left padding is each row's
++            # first key. A prompt that restores a cached prefix is prefilled on
++            # them: the mask below would be heads x chunk x the whole prefix.
+             from .kernels import relative_attention
+ 
+             sinks = self.sink_proj(x)
+@@ -954,7 +961,11 @@
+                 sinks,
+                 scale=self.head_dim**-0.5,
+                 window=self.sliding,
+-                key_start=mx.zeros((b,), mx.int32),
++                key_start=(
++                    mx.zeros((b,), mx.int32)
++                    if padding is None
++                    else mx.maximum(padding, 0)
++                ),
+                 length=valid_length,
+             )
+             return out.transpose(0, 2, 1, 3)
+diff -ruN a/mlx_vlm/server/compaction.py b/mlx_vlm/server/compaction.py
+--- a/mlx_vlm/server/compaction.py	2026-11-22 17:43:46.799611101 +0100
++++ b/mlx_vlm/server/compaction.py	2026-11-22 17:44:30.039670814 +0100
+@@ -791,8 +791,9 @@
+             "max_tokens": summary_tokens,
+             "temperature": 0.0,
+             "enable_thinking": False,
+-            "reasoning": None,
+-            "reasoning_effort": None,
++            # Keep the conversation's effort: templates that render it at the
++            # start of the prompt (Inkling's first system message) otherwise
++            # miss the conversation's checkpoint and prefill it all again.
+             "thinking_budget": None,
+             "response_format": None,
+             "text": None,
+diff -ruN a/mlx_vlm/tests/test_cache.py b/mlx_vlm/tests/test_cache.py
+--- a/mlx_vlm/tests/test_cache.py	2026-11-22 17:43:46.803611107 +0100
++++ b/mlx_vlm/tests/test_cache.py	2026-11-22 17:44:30.047670825 +0100
+@@ -2904,6 +2904,74 @@
+     assert manager.stats.memory_skips >= 1
+ 
+ 
++@parametrize("continues", [True, False])
++@parametrize("path", ["store", "coordinator"])
++def test_continuation_checkpoint_skips_prefill_reserve(
++    path, continues, managers, monkeypatch
++):
++    """A checkpoint that extends the resident one replaces it without also holding
++    the next prefill's reserve; any other store still holds it. (27B at ~100K:
++    7.8 GB needed with ~7 GB free, so every second turn re-read the prompt.)"""
++    monkeypatch.setenv("APC_CHECKPOINT_ENTRIES", "1")
++    manager = managers(budget=1 << 30)
++    old_tokens = list(range(64))
++    assert manager.store_exact_cache(old_tokens, [allocated(64)])
++    head = old_tokens if continues else list(range(5000, 5064))
++    new_tokens = head + list(range(1000, 1064))
++    if path == "store":
++        new = [allocated(128)]
++
++        def store():
++            return manager.store_exact_cache(new_tokens, new)
++
++    else:
++        new = [filled(batch_cache("dense"), length=128, heads=1, dim=4)]
++
++        def store():
++            return coordinate(manager, new).store_checkpoint(
++                new_tokens, new, batch_idx=0
++            )
++
++    # Room for the snapshot, not for a prefill reserve of the same size on top.
++    size = P._cache_nbytes(new)
++    monkeypatch.setattr(manager.memory_plan, "observe_cache", lambda *a, **k: size)
++    monkeypatch.setattr(manager, "_memory_headroom", lambda: size + size // 4)
++    assert store() == continues
++    if continues:
++        # The replacement is resident: the next request restores all of it.
++        monkeypatch.setattr(manager, "_memory_headroom", lambda: 1 << 40)
++        assert manager.lookup_exact_cache(new_tokens + [7])[1] == len(new_tokens)
++    else:
++        assert manager.stats.memory_skips >= 1
++
++
++@parametrize("evict", [True, False])
++def test_continuation_evicts_superseded_checkpoint_keeps_side_entry(
++    evict, managers, monkeypatch
++):
++    """APC_EVICT_SUPERSEDED=1, two entries: an agent's side request keeps its own
++    checkpoint while the conversation goes on, because the next turn's checkpoint
++    replaces the turn it extends instead of holding both (a whole cache each) and
++    pushing the side request's out. Off (the default) keeps the earlier turn for
++    an edited last message, and the side request's entry goes."""
++    monkeypatch.setenv("APC_CHECKPOINT_ENTRIES", "2")
++    monkeypatch.setenv("APC_EVICT_SUPERSEDED", "1" if evict else "0")
++    manager = managers(budget=1 << 30)
++    monkeypatch.setattr(manager, "_memory_headroom", lambda: 1 << 40)
++    turn = list(range(64))
++    side = list(range(5000, 5032))
++    assert manager.store_exact_cache(turn, [allocated(64)])
++    assert manager.store_exact_cache(side, [allocated(32)])
++    assert manager.lookup_exact_cache(turn + [7])[1] == len(turn)
++    longer = turn + list(range(1000, 1064))
++    assert manager.store_exact_cache(longer, [allocated(128)])
++    resident = sorted(len(e.token_ids) for e in manager._exact_cache.values())
++    kept = side if evict else turn
++    assert resident == sorted([len(kept), len(longer)])
++    assert manager.lookup_exact_cache(kept + [7])[1] == len(kept)
++    assert manager.lookup_exact_cache(longer + [7])[1] == len(longer)
++
++
+ def test_accounting_and_eviction(memory_manager, monkeypatch):
+     cache = NS(
+         state={"kv": mx.ones((2, 3)), "nested": [mx.zeros((4,))]},
+diff -ruN a/mlx_vlm/tests/test_inkling2_prefix_cache.py b/mlx_vlm/tests/test_inkling2_prefix_cache.py
+--- a/mlx_vlm/tests/test_inkling2_prefix_cache.py	1970-01-01 01:00:00.000000000 +0100
++++ b/mlx_vlm/tests/test_inkling2_prefix_cache.py	2026-11-22 17:44:30.039670814 +0100
+@@ -0,0 +1,332 @@
++"""Inkling 2 Mini prefix cache: follow-ups on a restored prefix, checkpoints on disk.
++
++The model is the tiny looped one from test_inkling2_loop: 4 sliding layers with
++a 4-key ring, 2 global layers, the loop core run 3 times (10 cache entries, each
++a K/V cache plus its convolution state). Everything but the two Metal tests runs
++on CPU in FP32.
++"""
++
++from types import SimpleNamespace as NS
++
++import mlx.core as mx
++import numpy as np
++import pytest
++
++from mlx_vlm import apc
++from mlx_vlm.generate.ar import BatchGenerator, _make_cache
++from mlx_vlm.models import cache as caches
++from mlx_vlm.models.inkling2 import kernels, language
++from mlx_vlm.tests.test_inkling2_loop import loop_case
++from mlx_vlm.utils import StoppingCriteria
++
++metal = pytest.mark.skipif(not mx.metal.is_available(), reason="needs Metal")
++GUARD = 8  # tokens left out of a checkpoint, as APC_CHECKPOINT_GUARD_TOKENS
++
++
++def document(length=300):
++    mx.random.seed(0)
++    return [int(t) for t in mx.random.randint(1, 59, (length,)).tolist()]
++
++
++def manager(root=None):
++    return apc.APCManager(
++        num_blocks=16,
++        block_size=16,
++        disk=apc.DiskBlockStore(root, namespace="t") if root else None,
++        overrides={
++            "memory_max_gb": 1.0,
++            "memory_reserve_gb": 0,
++            "checkpoint_entries": 1,
++            "checkpoint_interval_tokens": 0,
++            "checkpoint_guard_tokens": GUARD,
++        },
++    )
++
++
++def serve(lm, tokens, apc_manager, max_tokens=6):
++    """One request through the server's scheduler: (tokens, logprobs, cached)."""
++    runner = BatchGenerator(
++        lm,
++        NS(stopping_criteria=StoppingCriteria([])),
++        max_tokens=max_tokens,
++        prefill_batch_size=1,
++        completion_batch_size=1,
++        prefill_step_size=16,
++        apc_manager=apc_manager,
++        manage_wired_limit=False,
++    )
++    try:
++        # As the server does: embeddings, and the request's media hash (text only).
++        embeds = lm.model.embed(mx.array([tokens]))
++        kwargs = {"inputs_embeds": embeds, "_apc_semantic_hash": 0}
++        runner.insert([tokens], prompt_kwargs=[kwargs])
++        out, logprobs, cached = [], [], 0
++        while runner.has_work:
++            progress, results = runner.next()
++            cached = max([cached] + [p.cached_tokens for p in progress])
++            for r in results:
++                if r.token is not None:
++                    out.append(r.token)
++                    logprobs.append(r.token_logprob)
++        return out, np.array(logprobs), cached
++    finally:
++        runner.close()
++
++
++def reference_attention(q, k, v, rel, sinks, *, scale, window, key_start):
++    """What kernels.relative_attention computes, in plain MLX."""
++    (B, Hq, L, _), S, R = q.shape, k.shape[2], rel.shape[-1]
++    k, v = (mx.repeat(a, Hq // a.shape[1], axis=1) for a in (k, v))
++    keys = mx.arange(S)
++    distance = (S - L + mx.arange(L))[:, None] - keys[None]
++    bias = mx.take_along_axis(
++        rel.transpose(0, 2, 1, 3),
++        mx.broadcast_to(mx.clip(distance, 0, R - 1), (B, Hq, L, S)),
++        axis=-1,
++    )
++    visible = (distance >= 0) & (keys >= key_start.reshape(B, 1, 1, 1))
++    if window:
++        visible = visible & (distance < window)
++    scores = (q @ k.swapaxes(-1, -2)) * scale + mx.where(distance < R, bias, 0)
++    scores = mx.where(visible, scores, -mx.inf)
++    scores = mx.concatenate([scores, sinks.transpose(0, 2, 1)[..., None]], axis=-1)
++    return (mx.softmax(scores, axis=-1)[..., :S] @ v).transpose(0, 2, 1, 3)
++
++
++def kernel_only(monkeypatch):
++    """Send every prefill chunk through the kernel's contract and record it."""
++    calls = []
++
++    def attention(q, k, v, rel, sinks, **kwargs):
++        calls.append((q.shape[2], k.shape[2], kwargs["key_start"].tolist()))
++        return reference_attention(q, k, v, rel, sinks, **kwargs)
++
++    def dense_mask(*args, **kwargs):
++        raise AssertionError("a prefill chunk built the heads x chunk x keys mask")
++
++    monkeypatch.setattr(language, "_prefill_kernel", lambda q, k, v: True)
++    monkeypatch.setattr(kernels, "relative_attention", attention)
++    monkeypatch.setattr(language, "banded_additive_mask", dense_mask)
++    return calls
++
++
++def batch_cache_prefill(lm, ids, padding):
++    """Prefill one left-padded row on the server's batch caches, in three chunks."""
++    cache = _make_cache(lm, [padding])
++    prompt = mx.concatenate([mx.zeros((1, padding), mx.int32), ids[:, :9]], axis=1)
++    parts = [lm(prompt, cache=cache).logits[:, padding:]]
++    parts += [lm(ids[:, a:b], cache=cache).logits for a, b in ((9, 15), (15, 21))]
++    return mx.concatenate(parts, axis=1).astype(mx.float32)
++
++
++def test_follow_ups_restore_the_conversation_and_match_cold():
++    lm = loop_case()[0].language_model
++    prompt, cache, checkpoint = document(), manager(), 0
++    for _ in range(3):
++        expected, expected_logprobs, _ = serve(lm, prompt, None)
++        answer, logprobs, cached = serve(lm, prompt, cache)
++        assert cached == checkpoint
++        assert answer == expected
++        np.testing.assert_allclose(logprobs, expected_logprobs, atol=1e-5)
++        checkpoint = len(prompt) - GUARD
++        prompt = prompt + answer + [7, 8, 9, 10, 11]
++    assert cache.stats.exact_hits == 2 and cache.stats.memory_skips == 0
++
++
++def test_follow_up_prefill_stays_in_the_kernel(monkeypatch):
++    # A follow-up prefills its new tokens on one-row batch caches that hold the
++    # restored prefix. It must not fall back to the dense mask, which at 131k
++    # keys is 24 heads x chunk x 131k per global layer pass.
++    lm = loop_case()[0].language_model
++    prompt, cache = document(), manager()
++    answer, _, _ = serve(lm, prompt, cache)
++    follow = prompt + answer + [7 + i % 50 for i in range(40)]
++    expected, expected_logprobs, _ = serve(lm, follow, None)
++
++    calls = kernel_only(monkeypatch)
++    got, logprobs, cached = serve(lm, follow, cache)
++    assert cached == len(prompt) - GUARD
++    # Global layers attend to the whole restored prefix, from its first key.
++    # (The last prompt token is the first decode step.)
++    assert max(keys for _, keys, _ in calls) == len(follow) - 1
++    assert {tuple(start) for _, _, start in calls} == {(0,)}
++    assert got == expected
++    np.testing.assert_allclose(logprobs, expected_logprobs, atol=1e-4)
++
++
++@pytest.mark.parametrize("padding", [0, 3])
++def test_batch_cache_prefill_through_the_kernel_contract(padding, monkeypatch):
++    # Left padding is each row's first key; the sliding ring trims it away.
++    lm = loop_case()[0].language_model
++    ids = mx.array([list(range(1, 22))])
++    expected = np.array(lm(ids).logits)
++    calls = kernel_only(monkeypatch)
++    actual = batch_cache_prefill(lm, ids, padding)
++    assert {start[0] for _, _, start in calls} == {0, padding}
++    np.testing.assert_allclose(np.array(actual), expected, atol=3e-5)
++
++
++@metal
++@pytest.mark.parametrize("padding", [0, 3])
++def test_bf16_batch_cache_prefill_kernel_matches_dense_mask(padding, monkeypatch):
++    # The same on Metal in BF16: the kernel against the dense mask it replaces.
++    lm = loop_case(mx.bfloat16)[0].language_model
++    ids = mx.array([list(range(1, 22))])
++    with monkeypatch.context() as dense:
++        dense.setattr(language, "_prefill_kernel", lambda q, k, v: False)
++        expected = batch_cache_prefill(lm, ids, padding)
++
++    def dense_mask(*args, **kwargs):
++        raise AssertionError("a prefill chunk built the heads x chunk x keys mask")
++
++    monkeypatch.setattr(language, "banded_additive_mask", dense_mask)
++    actual = batch_cache_prefill(lm, ids, padding)
++    np.testing.assert_allclose(
++        np.array(actual), np.array(expected), atol=5e-2, rtol=5e-2
++    )
++
++
++@metal
++@pytest.mark.parametrize(
++    "keys,window,start",
++    [(5000, 0, 0), (5000, 0, 700), (5000, 0, 4990), (1063, 1024, 500)],
++)
++def test_relative_attention_kernel_first_key(keys, window, start):
++    # The model's head shape: a 40-token chunk whose first `start` keys are left
++    # padding (whole key blocks, part of one, and past the first queries), on a
++    # global layer and on a sliding layer's ring.
++    mx.random.seed(11)
++    hq, hkv, d, r, length = 24, 8, 128, 1024, 40
++    q = mx.random.normal((1, hq, length, d)).astype(mx.bfloat16)
++    k = mx.random.normal((1, hkv, keys, d)).astype(mx.bfloat16)
++    v = mx.random.normal((1, hkv, keys, d)).astype(mx.bfloat16)
++    rel = mx.random.normal((1, length, hq, r)).astype(mx.bfloat16)
++    sinks = mx.random.normal((1, length, hq)).astype(mx.bfloat16)
++    args = dict(scale=d**-0.5, window=window, key_start=mx.array([start]))
++    actual = kernels.relative_attention(q, k, v, rel, sinks, **args)
++    expected = reference_attention(
++        *(a.astype(mx.float32) for a in (q, k, v, rel, sinks)), **args
++    )
++    np.testing.assert_allclose(
++        np.array(actual.astype(mx.float32)), np.array(expected), atol=1e-2, rtol=1e-2
++    )
++
++
++def leaves(cache):
++    """Every K/V cache and convolution state of a prompt cache, in order."""
++    for entry in cache:
++        if isinstance(entry, caches.CacheList):
++            yield from leaves(entry.caches)
++        else:
++            yield entry
++
++
++def assert_same_state(actual, expected):
++    actual, expected = list(leaves(actual)), list(leaves(expected))
++    assert [type(c) for c in actual] == [type(c) for c in expected]
++    for a, e in zip(actual, expected):
++        if isinstance(e, caches.ArraysCache):
++            pairs = zip(a.cache, e.cache, strict=True)
++        else:
++            assert (
++                a.offset,
++                getattr(a, "_idx", None),
++                getattr(a, "max_size", None),
++            ) == (
++                e.offset,
++                getattr(e, "_idx", None),
++                getattr(e, "max_size", None),
++            )
++            pairs = zip(a.state, e.state, strict=True)
++        for x, y in pairs:
++            assert (x is None) == (y is None)
++            if y is not None:
++                assert x.dtype == y.dtype and x.shape == y.shape
++                assert mx.array_equal(x.astype(mx.float32), y.astype(mx.float32))
++
++
++def reopen(root, key):
++    """A restart: a new store finds the checkpoint from the files alone."""
++    store = apc.DiskBlockStore(root, namespace="t")
++    try:
++        return store.load_exact_cache(key)
++    finally:
++        store.close()
++
++
++def test_checkpoint_on_disk_restores_exact_logits(tmp_path):
++    lm = loop_case()[0].language_model
++    ids = mx.array([document(48)])
++
++    def prefill(cache):
++        # Chunks trim the 4-key ring; single tokens then rotate it in place.
++        for start in range(0, 32, 8):
++            mx.eval(lm(ids[:, start : start + 8], cache=cache).logits)
++        for i in range(32, 35):
++            mx.eval(lm(ids[:, i : i + 1], cache=cache).logits)
++        return cache
++
++    def continuation(cache):
++        parts = [lm(ids[:, 35:41], cache=cache).logits]
++        parts += [lm(ids[:, i : i + 1], cache=cache).logits for i in range(41, 48)]
++        return np.array(mx.concatenate(parts, axis=1))
++
++    live = prefill(lm.make_cache())
++    assert len(live) == 10 and live[0][0]._idx not in (0, live[0][0].max_size)
++    store = apc.DiskBlockStore(tmp_path, namespace="t")
++    assert store.save_exact_cache(1, ids[0, :35].tolist(), 0, live, synchronous=True)
++    store.close()
++    assert [p.suffix for p in tmp_path.rglob("exact_*")] == [".safetensors"]
++
++    tokens, _, restored = reopen(tmp_path, 1)
++    assert list(tokens) == ids[0, :35].tolist()
++    assert_same_state(restored, live)
++    logits = continuation(restored)
++    assert np.array_equal(logits, continuation(prefill(lm.make_cache())))
++    np.testing.assert_allclose(logits, np.array(lm(ids).logits[:, 35:]), atol=3e-5)
++
++
++def test_bf16_checkpoint_round_trips_bit_for_bit(tmp_path):
++    # The model's K/V is BF16 and its convolution state FP32; a ring that has
++    # wrapped keeps its raw slot order and write index.
++    mx.random.seed(1)
++    kv = caches.KVCache()
++    kv.keys, kv.values = (
++        mx.random.normal((1, 2, 512, 8)).astype(mx.bfloat16) for _ in range(2)
++    )
++    kv.offset = 300
++    ring = caches.RotatingKVCache(max_size=16)
++    ring.keys, ring.values = (
++        mx.random.normal((1, 2, 16, 8)).astype(mx.bfloat16) for _ in range(2)
++    )
++    ring.offset, ring._idx = 1000, 5
++    conv = caches.ArraysCache(4)
++    conv[0], conv[2] = mx.random.normal((1, 3, 8)), mx.random.normal((1, 3, 16))
++    saved = [caches.CacheList(kv, conv), caches.CacheList(ring, caches.ArraysCache(4))]
++    store = apc.DiskBlockStore(tmp_path, namespace="t")
++    assert store.save_exact_cache(2, list(range(300)), 0, saved, synchronous=True)
++    store.close()
++
++    _, _, restored = reopen(tmp_path, 2)
++    assert_same_state(restored, saved)
++    assert restored[0][0].keys.dtype == restored[1][0].values.dtype == mx.bfloat16
++    assert restored[0][1][0].dtype == mx.float32 and restored[0][1][1] is None
++
++
++def test_follow_up_after_a_restart_restores_from_disk(tmp_path):
++    lm = loop_case()[0].language_model
++    prompt = document()
++    first = manager(tmp_path)
++    answer, _, _ = serve(lm, prompt, first)
++    first.disk.close()
++
++    follow = prompt + answer + [7, 8, 9, 10, 11]
++    expected, expected_logprobs, _ = serve(lm, follow, None)
++    restarted = manager(tmp_path)
++    try:
++        got, logprobs, cached = serve(lm, follow, restarted)
++    finally:
++        restarted.disk.close()
++    assert cached == len(prompt) - GUARD and restarted.stats.disk_hits == 1
++    assert got == expected
++    np.testing.assert_allclose(logprobs, expected_logprobs, atol=1e-5)
+diff -ruN a/mlx_vlm/tests/test_server.py b/mlx_vlm/tests/test_server.py
+--- a/mlx_vlm/tests/test_server.py	2026-11-22 17:43:46.803611107 +0100
++++ b/mlx_vlm/tests/test_server.py	2026-11-22 17:44:30.039670814 +0100
+@@ -5160,6 +5160,26 @@
+         assert mocked.generate.call_count == 1
+         restore.assert_not_called()
+ 
++    def test_summary_request_renders_the_conversation_reasoning_effort(
++        self, mocked, client, monkeypatch
++    ):
++        # Inkling's template writes the effort into the first system message, so
++        # a summary rendered at another effort shares no prefix with the
++        # conversation's checkpoint and prefills the whole history again.
++        monkeypatch.setattr(server.runtime.config, "max_kv_size", 2048)
++        history = [_msg("older evidence " * 150) for _ in range(5)]
++        response = _post(
++            client,
++            messages=history + [_msg("What changed?")],
++            max_tokens=64,
++            reasoning_effort="low",
++        )
++        assert response.status_code == 200, response.text
++        assert mocked.generate.call_count > 1  # summaries, then the answer
++        efforts = [c.kwargs.get("reasoning_effort") for c in mocked.template.mock_calls]
++        assert efforts and set(efforts) == {"low"}
++        assert mocked.generate.call_args_list[0].kwargs["enable_thinking"] is False
++
+     @pytest.mark.parametrize("stream", [False, True])
+     @pytest.mark.parametrize(
+         "outcome", ["recover", "disabled", "summary-fails", "protected-too-large"]

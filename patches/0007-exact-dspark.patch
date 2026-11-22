@@ -1,7 +1,7 @@
 diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
---- a/mlx_vlm/generate/ar.py
-+++ b/mlx_vlm/generate/ar.py
-@@ -386,7 +386,10 @@
+--- a/mlx_vlm/generate/ar.py	2026-11-22 17:43:33.035592159 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 17:43:33.123592281 +0100
+@@ -432,7 +432,10 @@
  
      # Speculative decoding setup
      last_outputs = None
@@ -13,7 +13,7 @@ diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
      speculative_prefill_capture_kwargs = {}
      if draft_model is not None:
          from ..speculative.drafters import validate_drafter_compatibility
-@@ -547,7 +550,14 @@
+@@ -593,7 +596,14 @@
              if prefill_step_size is not None and should_chunk
              else None
          )
@@ -26,10 +26,10 @@ diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
 +            + max(int(max_tokens or 0), 0)
 +            + (32 if draft_model is not None else 0),
 +        )
-         if prefill_step_size is not None and should_chunk:
-             # Chunked prefill with embeddings
-             total_tokens = inputs_embeds.shape[1]
-@@ -2072,7 +2082,7 @@
+         host_vocab = _exact_host_vocab(model, chunk_embed)
+         if host_vocab is not None:
+             chunk_embed, restore_vocab = host_vocab
+@@ -2130,7 +2140,7 @@
          self._prompt_uids = list(uids)
          self.max_tokens = max_tokens
          self.prefill_step_size = prefill_step_size
@@ -39,8 +39,8 @@ diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
          self.draft_kind = draft_kind
          self.draft_block_size = draft_block_size
 diff -ruN a/mlx_vlm/models/inkling2/exact_verify.py b/mlx_vlm/models/inkling2/exact_verify.py
---- a/mlx_vlm/models/inkling2/exact_verify.py
-+++ b/mlx_vlm/models/inkling2/exact_verify.py
+--- a/mlx_vlm/models/inkling2/exact_verify.py	1970-01-01 01:00:00.000000000 +0100
++++ b/mlx_vlm/models/inkling2/exact_verify.py	2026-11-22 17:43:33.111592264 +0100
 @@ -0,0 +1,845 @@
 +"""Exact k-row speculative verifier for Inkling 2 / 2-loop (track B3).
 +
@@ -888,8 +888,8 @@ diff -ruN a/mlx_vlm/models/inkling2/exact_verify.py b/mlx_vlm/models/inkling2/ex
 +        verifiers[key] = verifier
 +    return verifier(tokens, cache)
 diff -ruN a/mlx_vlm/models/inkling2/fast_verify.py b/mlx_vlm/models/inkling2/fast_verify.py
---- a/mlx_vlm/models/inkling2/fast_verify.py
-+++ b/mlx_vlm/models/inkling2/fast_verify.py
+--- a/mlx_vlm/models/inkling2/fast_verify.py	1970-01-01 01:00:00.000000000 +0100
++++ b/mlx_vlm/models/inkling2/fast_verify.py	2026-11-22 17:43:33.111592264 +0100
 @@ -0,0 +1,200 @@
 +"""Fixed-k compiled exact-greedy verifier for Inkling2 DSpark."""
 +
@@ -1092,8 +1092,8 @@ diff -ruN a/mlx_vlm/models/inkling2/fast_verify.py b/mlx_vlm/models/inkling2/fas
 +        verifiers[key] = verifier
 +    return verifier(tokens, cache)
 diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels.py
---- a/mlx_vlm/models/inkling2/kernels.py
-+++ b/mlx_vlm/models/inkling2/kernels.py
+--- a/mlx_vlm/models/inkling2/kernels.py	2026-11-22 17:43:33.035592159 +0100
++++ b/mlx_vlm/models/inkling2/kernels.py	2026-11-22 17:43:33.111592264 +0100
 @@ -365,19 +365,7 @@
      )[0]
  
@@ -1297,9 +1297,9 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              && k0 + BK - 1 <= first_diag
              && (WINDOW == 0 || last_diag - k0 < WINDOW);
          const bool beyond_relative = fully_visible
-@@ -1670,9 +1684,184 @@
-     }
- """
+@@ -1820,9 +1834,184 @@
+     return src
+ 
  
 +# Fixed-k verification needs many key-axis threadgroups, while the prefill
 +# kernel above assigns only one threadgroup to a query-head block and walks the
@@ -1481,9 +1481,9 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
 +        "scale",
 +    ],
      output_names=["out"],
-     source=_RELATIVE_ATTENTION_SOURCE,
+     source=_RELATIVE_ATTENTION_SOURCE if (_KT == 1 and not _PF and not _SKIPU and not _KN and not _SWP) else _kt_source(_RELATIVE_ATTENTION_SOURCE),
      ensure_row_contiguous=False,
-@@ -1690,6 +1879,7 @@
+@@ -1840,6 +2029,7 @@
      scale: float,
      window: int,
      key_start: mx.array,
@@ -1491,7 +1491,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
  ) -> mx.array:
      """q: (B, Hq, L, D), k and v: (B, Hkv, S, D), all bfloat16, with the queries
      at the last L keys. rel: (B, L, Hq, R), the bias at distances below R.
-@@ -1697,6 +1887,10 @@
+@@ -1847,6 +2037,10 @@
      (B, L, Hq, D)."""
      B, Hq, L, D = q.shape
      Hkv, S = k.shape[1], k.shape[2]
@@ -1502,7 +1502,7 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
      bq = _BQ_SWA if window else _BQ
      grouped_heads = Hq // Hkv if _GQ > 1 else 1
      tg = grouped_heads * (bq // 8) * 32
-@@ -1708,6 +1902,7 @@
+@@ -1858,6 +2052,7 @@
              mx.contiguous(rel),
              mx.contiguous(sinks.astype(mx.float32)),
              mx.contiguous(key_start.astype(mx.int32)),
@@ -1511,8 +1511,8 @@ diff -ruN a/mlx_vlm/models/inkling2/kernels.py b/mlx_vlm/models/inkling2/kernels
              mx.array(scale, dtype=mx.float32),
          ],
 diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/language.py
---- a/mlx_vlm/models/inkling2/language.py
-+++ b/mlx_vlm/models/inkling2/language.py
+--- a/mlx_vlm/models/inkling2/language.py	2026-11-22 17:43:33.039592165 +0100
++++ b/mlx_vlm/models/inkling2/language.py	2026-11-22 17:43:33.111592264 +0100
 @@ -65,6 +65,7 @@
  _FUSED_NORM_CAST = _os.environ.get("MLX_VLM_INKLING2_FUSED_NORM_CAST", "1") == "1"
  _FUSED_ROUTER = _os.environ.get("MLX_VLM_INKLING2_FUSED_ROUTER", "1") == "1"
@@ -1589,8 +1589,8 @@ diff -ruN a/mlx_vlm/models/inkling2/language.py b/mlx_vlm/models/inkling2/langua
 +
 +        return compiled_verify(self, inputs, cache, capture_layer_ids)
 diff -ruN a/mlx_vlm/models/inkling2/step_cache.py b/mlx_vlm/models/inkling2/step_cache.py
---- a/mlx_vlm/models/inkling2/step_cache.py
-+++ b/mlx_vlm/models/inkling2/step_cache.py
+--- a/mlx_vlm/models/inkling2/step_cache.py	2026-11-22 17:43:33.031592153 +0100
++++ b/mlx_vlm/models/inkling2/step_cache.py	2026-11-22 17:43:33.111592264 +0100
 @@ -67,3 +67,71 @@
  
      def advance(self, n):
@@ -1664,8 +1664,8 @@ diff -ruN a/mlx_vlm/models/inkling2/step_cache.py b/mlx_vlm/models/inkling2/step
 +        # for completeness if a future cache mask requests explicit states.
 +        self.records[int(index)] = (intermediate, final)
 diff -ruN a/mlx_vlm/models/inkling2/verify_kernels.py b/mlx_vlm/models/inkling2/verify_kernels.py
---- a/mlx_vlm/models/inkling2/verify_kernels.py
-+++ b/mlx_vlm/models/inkling2/verify_kernels.py
+--- a/mlx_vlm/models/inkling2/verify_kernels.py	1970-01-01 01:00:00.000000000 +0100
++++ b/mlx_vlm/models/inkling2/verify_kernels.py	2026-11-22 17:43:33.111592264 +0100
 @@ -0,0 +1,1445 @@
 +"""Multi-row attention kernels for the exact k-row verifier (track B3).
 +
@@ -3113,8 +3113,8 @@ diff -ruN a/mlx_vlm/models/inkling2/verify_kernels.py b/mlx_vlm/models/inkling2/
 +        output_shapes=[(m, g, h)], output_dtypes=[mx.float32],
 +    )[0]
 diff -ruN a/mlx_vlm/speculative/cache_state.py b/mlx_vlm/speculative/cache_state.py
---- a/mlx_vlm/speculative/cache_state.py
-+++ b/mlx_vlm/speculative/cache_state.py
+--- a/mlx_vlm/speculative/cache_state.py	2026-11-21 16:06:15.000000000 +0100
++++ b/mlx_vlm/speculative/cache_state.py	2026-11-22 17:43:33.111592264 +0100
 @@ -216,6 +216,8 @@
      """Release and restore an unfinished transaction returned by a target."""
      if isinstance(state, SpeculativeCacheTransaction):
@@ -3134,8 +3134,8 @@ diff -ruN a/mlx_vlm/speculative/cache_state.py b/mlx_vlm/speculative/cache_state
          model.rollback_speculative_cache(caches, state, accepted, block_size)
  
 diff -ruN a/mlx_vlm/speculative/dflash.py b/mlx_vlm/speculative/dflash.py
---- a/mlx_vlm/speculative/dflash.py
-+++ b/mlx_vlm/speculative/dflash.py
+--- a/mlx_vlm/speculative/dflash.py	2026-11-21 16:06:15.000000000 +0100
++++ b/mlx_vlm/speculative/dflash.py	2026-11-22 17:43:33.111592264 +0100
 @@ -121,6 +121,14 @@
  ):
      gdn_states = None
@@ -3382,8 +3382,8 @@ diff -ruN a/mlx_vlm/speculative/dflash.py b/mlx_vlm/speculative/dflash.py
              if emitted >= max_tokens:
                  return
 diff -ruN a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
---- a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
-+++ b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py
+--- a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-21 16:06:15.000000000 +0100
++++ b/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py	2026-11-22 17:43:33.111592264 +0100
 @@ -7,6 +7,8 @@
  vllm/models/inkling2/{dspark,ops/dspark}.py (Apache-2.0).
  """
@@ -3649,8 +3649,8 @@ diff -ruN a/mlx_vlm/speculative/drafters/inkling2_dspark/dspark.py b/mlx_vlm/spe
          features = hidden.reshape(
              *hidden.shape[:2], -1, self.config.hidden_size
 diff -ruN a/mlx_vlm/speculative/utils.py b/mlx_vlm/speculative/utils.py
---- a/mlx_vlm/speculative/utils.py
-+++ b/mlx_vlm/speculative/utils.py
+--- a/mlx_vlm/speculative/utils.py	2026-11-21 16:06:15.000000000 +0100
++++ b/mlx_vlm/speculative/utils.py	2026-11-22 17:43:33.111592264 +0100
 @@ -163,17 +163,42 @@
  class SpeculativePrefill:
      """Retain the target features needed by a drafter across prompt chunks."""

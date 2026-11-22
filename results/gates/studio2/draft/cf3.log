@@ -1,0 +1,5 @@
+17:39:10 ctx 32768 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5 MLX_VLM_INKLING2_DRAFT_CTX_WINDOW=8192
+cfw8k0.5-32768-k8 dtps 39.48 ptps 884.0 needle True acc 0.6595744680851063 rounds 33 misses 0 ntok 126 
+cfw8k0.5-32768-k8 dtps 56.94 ptps 886.9 needle True acc 0.6595744680851063 rounds 33 misses 0 ntok 126 
+DSDONE
+CFDONE

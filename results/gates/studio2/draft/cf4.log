@@ -1,0 +1,9 @@
+17:40:35 ctx 32768 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.5 
+cfp0.5-32768-k8 dtps 65.58 ptps 884.5 needle True acc 0.8782608695652174 rounds 25 misses 0 ntok 126 
+cfp0.5-32768-k8 dtps 71.45 ptps 884.8 needle True acc 0.8782608695652174 rounds 25 misses 0 ntok 126 
+DSDONE
+17:41:59 ctx 32768 k 8 step 4096 MLX_VLM_INKLING2_DRAFT_CONF=0.6 
+cfp0.6-32768-k8 dtps 66.30 ptps 884.8 needle True acc 0.8928571428571429 rounds 26 misses 0 ntok 126 
+cfp0.6-32768-k8 dtps 70.93 ptps 883.9 needle True acc 0.8928571428571429 rounds 26 misses 0 ntok 126 
+DSDONE
+CFDONE

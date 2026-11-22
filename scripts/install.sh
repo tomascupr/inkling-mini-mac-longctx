@@ -4,7 +4,7 @@
 #
 #   bash scripts/install.sh            ROOT=~/inkling-mini by default
 #   PREFIX=1 bash scripts/install.sh   also apply 0004-prefix-cache.patch (+ 0006 eviction fix) to the patched copy
-#   EXACT_DSPARK=1 bash scripts/install.sh   also apply 0007-exact-dspark.patch (bit-identical speculative decoding)
+#   NO_DRAFT=1 bash scripts/install.sh  skip 0007/0012 (the draft head is applied by default: same tokens, faster writing)
 #   (0008 KT3 attention tiles and 0009 host vocab tables are always applied; both are off unless their env is set)
 #   DSPARK=1 bash scripts/install.sh   older 0005 (same tokens, not bitwise) on stacked-v4.patch; not combinable with PREFIX=1
 #
@@ -33,19 +33,26 @@ if [ "${DSPARK:-0}" != 1 ]; then
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0009-host-vocab-prefill.patch")
     # Short-context reading: env MLX_VLM_INKLING2_PREFILL_FUSED=1 (bit-identical fused prefill kernels).
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0010-prefill-fused.patch")
-    # Short-prompt writing: env MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024 (opt-in; quality-gated, not bit-identical).
+    # Short-prompt writing: env MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024 (on in scripts/env.sh; same answers, quality-gated).
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0011-decode-min-keys.patch")
 fi
 if [ "${PREFIX:-0}" = 1 ] && [ "${DSPARK:-0}" = 1 ]; then
     echo "PREFIX=1 and DSPARK=1 cannot be combined yet" >&2; exit 1
 fi
-if [ "${EXACT_DSPARK:-0}" = 1 ] && [ "${DSPARK:-0}" != 1 ]; then
+DRAFT=0
+if [ "${NO_DRAFT:-0}" != 1 ] && [ "${DSPARK:-0}" != 1 ]; then
+    # Speculative decoding with the official draft head, exact verify (same tokens) + confidence cut.
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0007-exact-dspark.patch")
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0012-draft-confidence-cut.patch")
+    DRAFT=1
 fi
 if [ "${DSPARK:-0}" = 1 ]; then
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0005-dspark-compiled-verify.patch")
 fi
-if [ "${PREFIX:-0}" = 1 ]; then
+if [ "${PREFIX:-0}" = 1 ] && [ "$DRAFT" = 1 ]; then
+    # 0004 + 0006 rebased onto 0007 (one hunk overlapped); prefix cache + draft not yet measured end to end.
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0013-prefix-cache-on-exact-dspark.patch")
+elif [ "${PREFIX:-0}" = 1 ]; then
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0004-prefix-cache.patch")
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0006-prefix-cache-evict-fix.patch")
 fi
@@ -58,4 +65,4 @@ for v in base stacked; do
     PYTHONPATH="$ROOT/src/$v" "$ROOT/venv/bin/python" -c \
         "import mlx.core as mx, mlx_vlm; print('$v', mlx_vlm.__version__, mlx_vlm.__file__, 'mlx', mx.__version__)"
 done
-echo "Recommended run env: MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2 MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1 MLX_VLM_INKLING2_PREFILL_FUSED=1 PYTHONPATH=$ROOT/src/stacked"
+echo "Run env: source scripts/env.sh   (ROOT=$ROOT; NO_DRAFT=1 for no draft head)"
