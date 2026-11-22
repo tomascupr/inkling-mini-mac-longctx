@@ -1,0 +1,8 @@
+ctx 4096 k 1 ptps 951.2 dtps 50.07 peak 20.05 gen 123 tok_eq_stack4_nonspec True needle True sha_eq_stack4 True
+ctx 4096 k 5 ptps 877.0 dtps 63.53 peak 20.33 gen 123 tok_eq_stack4_nonspec True needle True 
+ctx 4096 k 5 ptps 972.3 dtps 65.52 peak 20.33 gen 123 tok_eq_stack4_nonspec True needle True 
+ctx 32768 k 1 ptps 868.8 dtps 47.30 peak 21.13 gen 126 tok_eq_stack4_nonspec True needle True sha_eq_stack4 True
+ctx 32768 k 5 ptps 866.6 dtps 59.90 peak 21.32 gen 126 tok_eq_stack4_nonspec True needle True 
+ctx 32768 k 8 ptps 866.4 dtps 63.83 peak 21.32 gen 126 tok_eq_stack4_nonspec True needle True 
+ctx 131072 k 8 ptps 622.1 dtps 53.52 peak 24.69 gen 126 tok_eq_stack4_nonspec True needle True 
+ctx 131072 nonspec ovC5 ptps 623.2 dtps 35.87 peak 23.34 tokens_equal True sha_equal_unpatched True
