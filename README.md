@@ -1,10 +1,11 @@
-# Inkling 2 Mini on a Mac Studio
+# Exact weights. Faster writing.
 
-**Optimised quality at highest speed.**
+**Optimised quality at highest speed.** Inkling 2 Mini with the official weights exactly as shipped, on an M4 Max Mac
+Studio. It writes faster than MLX-Serve at 4k and 32k and reads faster at 32k; at 4k, reading is level.
 
-The official Inkling 2 Mini weights, served on an M4 Max Mac Studio. No requantizing, no FP8 KV cache, no sparse or
-approximate attention, and the outputs match the reference implementation. The speed comes from engineering alone:
-custom Metal kernels, a reworked server pipeline and fixes to the draft head.
+No requantizing, no FP8 KV cache, no sparse or approximate attention, and the outputs match the reference
+implementation. The speed comes from engineering alone: custom Metal kernels, a reworked server pipeline and fixes to
+the draft head.
 
 - **+5.4% faster writing** than MLX-Serve at 4k and **+4.3%** at 32k
 - **+3.2% faster reading** at 32k, **level** at 4k
@@ -19,9 +20,9 @@ the baseline. Both servers ran on the same M4 Max Mac Studio in the same session
 official weights, the same prompts and their draft heads on. Every run is the server's own log line.
 
 <!-- To add a prompt length (131k, later 262k): list its session log under "h2h_sessions" in
-     results/h2h-20261122/charts.json and run `python scripts/charts.py`. The table, both charts and the BENCHMARKS
-     tables are regenerated with the same counting, rounding and verdict rules. Then bring the bullets above in line
-     with the new row: faster only where its verdict says faster. -->
+     results/h2h-20261122/charts.json and run `python scripts/charts.py`. The table, both charts, the BENCHMARKS
+     tables and the X renders (docs/img/x-*.png) are regenerated with the same counting, rounding and verdict rules. Then bring the title, subline and bullets above in line with the new row: faster only where its
+     verdict says faster. -->
 <!-- gen:h2h-table -->
 | Prompt | Reading (prefill), tok/s<br>MLX-Serve → this repo | | Writing (decode), tok/s<br>MLX-Serve → this repo | |
 |---|---:|:--|---:|:--|
