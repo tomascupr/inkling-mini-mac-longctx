@@ -6,6 +6,20 @@ with a draft model, the same tokens as without it.
 
 ## 2026-11-22
 
+- **14:07 — 1M on the current build at step 2048: reading 156.0 → 163.3 tok/s (+4.7%), writing 10.04 → 11.36 tok/s
+  (+13%), peak 50.76 of 51.84 GiB, needle found** (`results/gates/h6-1m-step2048.json`). Gains come from the bigger
+  prefill chunk (fits since the conv-state fix; the synthetic-depth probe predicted +7.6% and 50.58 GiB) and the decode
+  track's final 0002. 70% of the 233 tok/s arithmetic ceiling; decode 83% of its bandwidth ceiling.
+- **13:00–13:55 — second test rig (Studio 2, same M4 Max / 64 GB) for exactness gates.** KT=3 (three BK16 tiles staged
+  per barrier pair in the global relative-attention prefill kernel; per-row online-softmax order unchanged) is
+  bit-identical to the unpatched fork at 32k / 131k / 262k (tokens + logprob sha, needle found). End to end it is
+  within noise at 32k (786.7 vs 789.7) and +0.6–1.1% at 131k (572.5 / 575.9 vs 569.4); the kernel gain (+3.9% at 1M
+  keys, T=2048) only shows at 0.5–1M depth. Still to measure at 1M.
+- **13:20–13:55 — DSpark block size (exact verify, all runs bit-identical to the fork):** warm writing tok/s on Studio 2,
+  4k: k3 56.5 / k4 56.7 / k5 58.1; 32k: k3 58.8 / k4 62.5 / k5 63.9 / k6 57.7 / k8 56.1; 131k (cold): k4 48.5 / k5 47.9
+  / k6 44.7. The adaptive selector (`MLX_VLM_INKLING2_ADAPT_K`) settles on its largest candidate in these short
+  (~125-token) answers, so it equals fixed k (3,4,5 → 63.7 at 32k) and adds nothing. Block 4 stays; k5 is +1–2% at
+  ≤32k only, within run-to-run noise. Acceptance (77% at k4) is the limit, not block size.
 - **12:08 — bit-identical speculative decoding verified and pushed (`0007`).** Draft block 4 at 32k / 131k / 262k:
   65.99 / 52.67 / 35.72 tok/s writing (no draft 53.73 / 40.16 / 29.76), tokens AND logprob sha equal to the unpatched
   fork's no-draft run at all three. Earlier the DSpark port without the exact verifier was slower than no draft on

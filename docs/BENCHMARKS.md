@@ -20,7 +20,8 @@ Gutenberg text, prefill step 2048, 256 max new tokens. Needle found in every row
 | 131k (131,054) | **625.2** | **40.16** | **23.36** | 401.9 / 16.2 / 33.58 | 1.56× / 2.48× | bit-identical to unpatched code |
 | 262k (262,126) | **453.9** | **29.76** | **27.35** | 256.4 / 10.7 / 35.38 | 1.77× / 2.78× | bit-identical to unpatched code |
 | 524k (524,270), previous build | **292.6** | **17.86** | **35.35** | not measured on the standard build | – | needle found (no 524k unpatched reference run) |
-| 1M (1,048,558), step 512, text-only, previous build | **156.0** | **10.04** | **50.04** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
+| 1M (1,048,558), step 2048, text-only | **163.3** | **11.36** | **50.76** | not measured on the standard build | – | needle found (no 1M unpatched reference run) |
+| 1M, step 512, text-only, previous build | 156.0 | 10.04 | 50.04 | | | needle found |
 
 **Bit-identical speculative decoding (`0007`, 2026-11-22 11:53–12:08 CET).** `stacked.patch` + `0007-exact-dspark.patch`,
 env `MLX_VLM_INKLING2_INCREMENTAL_DRAFT_PREFILL=1 MLX_VLM_INKLING2_EXACT_VERIFY=1 MLX_VLM_INKLING2_COMPILED_VERIFY=1
@@ -80,7 +81,7 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
   recommended env, one gate run `results/gates/gate-stack6-20261122-1108.log`, runs `results/gates/s6-*.json`; tokens
   AND logprob sha256 identical to the unpatched fork at all four lengths (references below). Reading is unchanged from
   the previous build (within 0.3%); writing is +10–14% (previous build: 50.64 / 47.23 / 35.80 / 27.01).
-  The 524k and 1M rows are the previous build (`stacked-v4.patch`).
+  The 524k row is the previous build (`stacked-v4.patch`). The 1M row is the current `stacked.patch` at step 2048 (below).
 - Previous build's 4k, 32k and 131k rows: `stacked-v4.patch` (2026-11-22 03:20 CET), recommended env, gate log
   `results/gates/gate-20261122-0320.log`, runs `results/gates/gate-*.json`. The 4k reference is the unpatched fork at 4k
   (941.5 / 35.27 / 25.10 GiB). The 262k and 524k rows are the headline runs
@@ -93,7 +94,14 @@ bit-identical (tokens + logprob sha at 4k/32k/131k). Speculative runs are checke
   (server log: cold `time_to_first_token=218.274s`, follow-up `cached_tokens=131006`, `time_to_first_token=1.459s`;
   the table uses the client-side times), `results/LEADERBOARD.tsv` (every experiment).
 
-1M: measured 2026-11-22 05:15–07:07 CET (`results/gates/h-1m.json`, `results/gates/headline-20261122.log`):
+1M, current build: measured 2026-11-22 12:20–14:07 CET (`results/gates/h6-1m-step2048.json`, `results/gates/headline-h6-20261122.log`):
+1,048,558 prompt tokens read in 6,420 s (163.3 tok/s, +4.7% vs 156.0), 95 tokens written at 11.36 tok/s (+13% vs 10.04), needle found,
+peak 50.76 GiB against the 51.84 GiB cap. Settings: current `stacked.patch`, recommended env, **step 2048** (fits since the
+conv-state fix; synthetic-depth probe predicted 50.58 GiB), vision tower dropped, default max context, no sysctl. It wrote the
+same answer as the step-512 run, but the tokens differ from position 9 (both 95 tokens) and so does the logprob sha: the
+fork itself is not chunk-size invariant (step 512 vs 2048 also changes the fork's own logprobs), and there is no unpatched 1M reference at either step.
+
+1M, previous build: measured 2026-11-22 05:15–07:07 CET (`results/gates/h-1m.json`, `results/gates/headline-20261122.log`):
 1,048,558 prompt tokens read in 6,721 s (156.0 tok/s), 95 tokens written at 10.04 tok/s, needle found, peak 50.04 GiB
 against the 51.84 GiB cap (projection was ~50.0). Settings: recommended env, step 512, vision tower dropped
 (`scripts/exact_text_only.py`, text logits unchanged), default max context, no sysctl.
@@ -157,7 +165,8 @@ N tokens. (An earlier count charged every token the last chunk's depth, which ov
 | 131k | 15.78 | 900 | 624.3 | 69.4% |
 | 262k | 22.22 | 639 | 453.6 | 71.0% |
 | 524k | 35.11 | 404 | 292.6 | 72.4% |
-| 1M (step 512) | 60.88 | 233 | 156.0 | 67.0% |
+| 1M (step 2048) | 60.88 | 233 | 163.3 | 70.0% |
+| 1M (step 512, previous build) | 60.88 | 233 | 156.0 | 67.0% |
 
 At 524k this is 18.4 PFLOP for the whole prompt (73% global attention), a floor of
 ~21.6 min at peak; measured 29.9 min. Where prefill time goes now: big matmuls run at ~96% of peak and
@@ -175,6 +184,7 @@ Details: `docs/trackA-prefill-notes.md`, `docs/PREFILL_TECHNIQUES.md` §7.
 | 131k | 9.96 | 18.24 | 54.8 | 40.16 | 73% |
 | 262k | 14.26 | 26.11 | 38.3 | 29.76 | 78% |
 | 524k (previous build) | 22.85 | 41.85 | 23.9 | 17.86 | 75% |
+| 1M | 40.03 | 73.3 | 13.6 | 11.36 | 83% |
 | 1M (previous build) | 40.03 | 73.3 | 13.6 | 10.04 | 74% |
 
 The remaining decode gap is mostly CPU-side graph build/encode (~17 ms/token) and CPU↔GPU

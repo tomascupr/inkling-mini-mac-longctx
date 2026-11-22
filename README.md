@@ -17,11 +17,11 @@ Speeds are tokens per second. **Reading** = processing your prompt or document (
 | 131k tokens | 401.9 → **625.2** | 16.2 → **40.2** | 1.56× / 2.48× |
 | 262k tokens | 256.4 → **453.9** | 10.7 → **29.8** | 1.77× / 2.78× |
 | 524k tokens | not measured* → **292.6** | not measured* → **17.9** | – |
-| 1M tokens | not measured* → **156.0** | not measured* → **10.0** | – |
+| 1M tokens | not measured* → **163.3** | not measured* → **11.4** | – |
 
-The 524k and 1M rows were measured with the previous build (writing ~10–12% slower than today's at 4k–262k); they will be re-run.
+The 1M row is today's build at prefill step 2048 (was 156.0 / 10.0 with the previous build at step 512). The 524k row is still the previous build (writing ~10–12% slower than today's at 4k–262k); it will be re-run.
 
-\* We have no 524k or 1M run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes (peak 35.3 GiB of GPU memory) and the full 1M-token document (1,048,558 tokens) in 1 h 52 min (peak 50.0 of the 51.8 GiB GPU limit), and found the hidden fact both times.
+\* We have no 524k or 1M run on the standard build, so there is no "before" number (an earlier 524k run on the unpatched fork was stopped after 14 minutes, still reading). Ours read the 524k-token document in 30 minutes (peak 35.3 GiB of GPU memory) and the full 1M-token document (1,048,558 tokens) in 1 h 47 min (peak 50.8 of the 51.8 GiB GPU limit), and found the hidden fact both times.
 
 The longer the prompt, the bigger the gain. At 32k–1M the model found a fact hidden in the middle of the document in every run, before and after.
 Full benchmarks, methods and raw logs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
