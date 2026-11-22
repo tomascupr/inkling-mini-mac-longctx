@@ -1,48 +1,109 @@
-# Inkling 2 Mini on a Mac, fast
+# Inkling 2 Mini on a Mac Studio
 
-**Full quality on the official weights · up to 2.8× faster than the standard MLX build · 1M-token context on a 64 GB M4 Max.**
+**Optimised quality at highest speed.**
 
-Thinking Machines' Inkling-2-Mini, tuned for one Mac Studio (M4 Max, 64 GB). Speculative decoding is on by default and
-writes exactly the tokens the model would write without it, and the same build reads a full 1M-token document on a
-single 64 GB machine and finds the fact hidden inside. Here it is next to MLX-Serve, on the same Mac, the same
-official weights and the same prompts:
+The official Inkling 2 Mini weights, served on an M4 Max Mac Studio. No requantizing, no FP8 KV cache, no sparse or
+approximate attention, and the outputs match the reference implementation. The speed comes from engineering alone:
+custom Metal kernels, a reworked server pipeline and fixes to the draft head.
 
-![Writing the answer: this repo vs MLX-Serve, 4k and 32k prompts](docs/img/writing-vs-mlxserve.svg)
+- **+5.4% faster writing** than MLX-Serve at 4k and **+4.3%** at 32k
+- **+3.2% faster reading** at 32k, **level** at 4k
+- **8/8** greedy answers identical to the reference and **520/520** teacher-forced top-1 tokens on our quality gate
+  ([on which stack](#quality))
+- The hidden fact found in **12/12** of our head-to-head answers
 
-![Reading a prompt: this repo vs MLX-Serve, 4k and 32k prompts](docs/img/reading-vs-mlxserve.svg)
+## Against MLX-Serve: same Mac, same session
 
-![Reading and writing speed from 4k to 1M tokens of context](docs/img/long-context.svg)
+[MLX-Serve](https://github.com/ddalcu/mlx-serve) is a strong, fast Inkling 2 Mini server for Apple Silicon, so it is
+the baseline. Both servers ran on the same M4 Max Mac Studio in the same session, MLX-Serve first, with the same
+official weights, the same prompts and their draft heads on. Every run is the server's own log line.
 
-Charts are drawn by `scripts/charts.py` straight from the server logs in `results/h2h-20261122/` and the run files
-in `results/gates/`. Full tables, methods and what is not measured yet: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+<!-- To add a prompt length (131k, later 262k): list its session log under "h2h_sessions" in
+     results/h2h-20261122/charts.json and run `python scripts/charts.py`. The table, both charts and the BENCHMARKS
+     tables are regenerated with the same counting, rounding and verdict rules. Then bring the bullets above in line
+     with the new row: faster only where its verdict says faster. -->
+<!-- gen:h2h-table -->
+| Prompt | Reading (prefill), tok/s<br>MLX-Serve → this repo | | Writing (decode), tok/s<br>MLX-Serve → this repo | |
+|---|---:|:--|---:|:--|
+| 4k (4,078 tokens) | 1,036.2 → 1,039.8 | level (+0.36%) | 76.3 → 80.4 | **+5.4% faster** |
+| 32k (32,750 tokens) | 898.5 → 927.8 | **+3.2% faster** | 72.6 → 75.7 | **+4.3% faster** |
 
-## How it's fast
+<sub>Same-session runs h29 (22:33) and h30 (22:42) CET, 2026-11-22. Warm runs, server-reported rates: MLX-Serve's 16-token warm-up and our first request per prompt length are not counted. Rounding never favours this repo. Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>
+<!-- /gen:h2h-table -->
 
-- **Exact draft verifier + confidence cut + draft vocabulary list:** the DSpark draft head's guesses are checked with
-  the same GPU arithmetic as normal writing (same tokens), the check stops at the first unlikely guess, and the draft
-  proposes from a 16k-token candidate list.
-- **Fused prefill kernels** that keep MLX's own order of additions, so they stay bit-identical.
-- **Compiled decode in the server**, the same compiled step the command line uses.
-- **Attention tiles (KT=3)** that stage three key blocks per barrier for long-context reading.
-- **Vocabulary tables in host memory** during 1M-token reads, which keeps the GPU under MLX's buffer-cache limit.
+![Reading speed vs MLX-Serve by prompt length](docs/img/reading-vs-mlxserve.svg)
+
+![Writing speed vs MLX-Serve by prompt length](docs/img/writing-vs-mlxserve.svg)
+
+## What's different
+
+**Custom Metal kernels that keep MLX's arithmetic.** Reading a prompt runs through fused kernels for the attention
+residuals, message gates, MoE combine, l2 clips and sliding-window attention. Each one adds its numbers in exactly the
+order MLX does, so the results are bit for bit those of the unfused code, in fewer and larger GPU passes. The latest
+two: sliding-window attention in 64-query blocks (+2.4% reading at 4k, +2.2% at 32k) and the l2 clips as one kernel
+per call (+1.2% at 4k, +0.8–0.9% at 32k).
+
+**A server that takes the fast path.** The server was decoding without the compiled step, and it ran the draft head
+through a batching path with no exact verifier. Fixing both took server writing at 4k from 44.0 to 60.1–60.6 tok/s
+without the draft and from 31.1 to 77.5–81.6 tok/s with it. Then the last prompt chunk and the last token went into
+one forward pass, and three server settings changed: an 8192-token prefill chunk, per-layer work queued
+asynchronously, and no 1 GiB buffer-cache limit (it made prefill re-allocate its buffers on every layer). The three
+settings took 32k server reading from 863.4–864.2 to 899.3–901.3 tok/s.
+
+**Draft-head fixes.** Inkling ships a small draft head that guesses several tokens ahead. Its guesses are checked with
+exactly the arithmetic of normal one-token-at-a-time decoding, so the output is the same tokens as without it. The
+check stops at the first low-confidence guess, the draft proposes from a 16k-token candidate list plus the prompt's
+own tokens, and the server now hands the draft head the prompt, which it didn't before (4k server writing 68.2–68.9
+to 80.2–80.6 tok/s).
+
+**Long context on 64 GB.** The same code base reads a 1,048,558-token prompt on one 64 GB Mac Studio and finds the fact
+hidden in it (175.6 tok/s reading, 11.38 tok/s writing; command line, draft head off, measured before the latest
+prefill kernels).
+
+What we tried that didn't work, with numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#what-did-not-work).
 
 ## Quality
 
-Official weights as shipped (NVFP4 + MXFP8): no re-quantization, no FP8 KV cache, no sparse or approximate attention.
-With the defaults, the answers match the reference fork's token for token on our fixed 8-prompt set (8/8) and the
-hidden fact is found at 4k through 1M.
+- Official weights exactly as Thinking Machines ships them (NVFP4 + MXFP8), bf16 KV cache.
+- Quality gate on the stack through patch 0018: through the draft head, greedy answers are identical to the reference
+  (the unpatched community fork this repo builds on) on 8/8 prompts, and teacher-forced top-1 agrees on 520/520 tokens.
+- The two kernel changes added after that gate were bitwise-equal in their own tests. The full gate has not yet been
+  re-run on the exact final stack, nor with `serve.sh`'s settings (an 8192-token prefill chunk where the gate used 2048):
+  [what is verified on what](docs/BENCHMARKS.md#quality-what-is-verified-on-what).
 
-## Install
+## Quickstart
+
+macOS on Apple Silicon. Measured on an M4 Max Mac Studio with 64 GB only. The weights are about 18 GiB.
 
 ```bash
-git clone https://github.com/tomascupr/inkling-mini-mac-longctx && cd inkling-mini-mac-longctx && bash scripts/install.sh && hf download thinkingmachines/Inkling-2-Mini --local-dir ~/inkling-mini/models/Inkling-2-Mini && source scripts/env.sh
+git clone https://github.com/tomascupr/inkling-mini-mac-longctx && cd inkling-mini-mac-longctx
+bash scripts/install.sh      # fork + patches + venv (mlx 0.32.4) in ~/inkling-mini
+hf download thinkingmachines/Inkling-2-Mini --local-dir ~/inkling-mini/models/Inkling-2-Mini
+bash scripts/serve.sh 8080   # OpenAI-compatible server with the benchmarked settings
 ```
 
-## Credits
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "'"$HOME"'/inkling-mini/models/Inkling-2-Mini",
+  "messages": [{"role": "user", "content": "Explain speculative decoding in two sentences."}],
+  "max_tokens": 256, "temperature": 0}'
+```
 
-Built on [betizzel/mlx-vlm `m5pro-inkling2`](https://github.com/betizzel/mlx-vlm/tree/m5pro-inkling2), which ports
-jundot's `relative_attention` kernel from [ml-explore/mlx-lm#2086](https://github.com/ml-explore/mlx-lm/pull/2086).
-Also on [inkling2-mlx](https://github.com/internet-projects/inkling2-mlx), [MLX-VLM](https://github.com/Blaizzy/mlx-vlm)
-and Apple's [MLX](https://github.com/ml-explore/mlx). Inkling-2-Mini is by Thinking Machines Lab.
+`serve.sh` serves one request at a time with the draft head on for 1,024 to 262,144 context tokens
+(`NO_DRAFT=1 bash scripts/serve.sh` turns it off). Every setting it uses: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#settings-and-environment-variables).
+
+## Docs
+
+- [docs/BENCHMARKS.md](docs/BENCHMARKS.md): method, every raw run, quality evidence, settings, what didn't work, long context.
+- [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md): the full experiment log, failures included.
+- [docs/PREFILL_TECHNIQUES.md](docs/PREFILL_TECHNIQUES.md), [docs/PRIOR_ART.md](docs/PRIOR_ART.md).
+
+## Built on
+
+[betizzel/mlx-vlm `m5pro-inkling2`](https://github.com/betizzel/mlx-vlm/tree/m5pro-inkling2) (itself built on
+[inkling2-mlx](https://github.com/internet-projects/inkling2-mlx)) with jundot's relative-attention kernel from
+[ml-explore/mlx-lm#2086](https://github.com/ml-explore/mlx-lm/pull/2086), on [mlx-vlm](https://github.com/Blaizzy/mlx-vlm)
+and Apple's [MLX](https://github.com/ml-explore/mlx). [MLX-Serve](https://github.com/ddalcu/mlx-serve) by ddalcu is
+the strong baseline we measured against. Inkling 2 Mini is by Thinking Machines Lab.
 
 MIT licensed (see `LICENSE`); hunks touching the Apache-2.0 `inkling2_loop` files stay Apache-2.0.
