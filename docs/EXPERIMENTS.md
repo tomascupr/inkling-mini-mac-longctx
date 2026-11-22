@@ -321,3 +321,8 @@ One line per attempt. Server log, warm run, 4k / 32k; S1 = Studio 1, S2 = Studio
   -> `MLX_VLM_RELATIVE_ATTN_BQ_SWA=64` (env only, same arithmetic).
 - Expert gather without the sorted copy of x (`gather_qmm` with `lhs_indices`, microbench): bitwise equal, 66.6 vs
   70.5 ms in a synthetic bench. Not wired yet.
+- **`MLX_VLM_RELATIVE_ATTN_BQ_SWA=64` in the server (single warm run):** S1 4k 1089.0 -> 1115.2 (+2.4%), 32k 972.5 ->
+  994.8 (+2.3%); S2 1026.2 / 1032.2 at 4k (MLX-Serve 1026.4–1036.6 at 21:51) and 917.0 at 32k (+2.2% over MLX-Serve).
+  Writing unchanged. WIN; default in `env.sh` and `serve.sh`.
+- Expert GEMM reading x rows in place via `lhs_indices` (`PF_LHS=1`) in the server: 4k 354.9, 32k 341.1. MLX takes a
+  much slower gather kernel when `lhs_indices` is not the identity. FAIL.

@@ -7,6 +7,7 @@ MODEL=${MODEL:-$ROOT/models/Inkling-2-Mini}
 export PYTHONPATH=$ROOT/src/stacked
 export MLX_VLM_EXACT_PREFILL_EVAL_EVERY=1 MLX_MAX_MB_PER_BUFFER=2
 export MLX_VLM_RELATIVE_ATTN_KTILES=3 MLX_VLM_EXACT_HOST_VOCAB=1      # long-context reading (0008, 0009)
+export MLX_VLM_RELATIVE_ATTN_BQ_SWA=64                              # sliding-window attention tiles (bitwise equal)
 export MLX_VLM_INKLING2_PREFILL_FUSED=1                                # fused prefill kernels (0010)
 export MLX_VLM_INKLING2_DECODE_MIN_KEYS=1024                           # compiled decode from 1k keys (0011)
 if [ "${NO_DRAFT:-0}" != 1 ]; then
