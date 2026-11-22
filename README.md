@@ -16,12 +16,12 @@ Needle-in-a-haystack retrieval passes at every length. Full benchmarks, methodol
 ## Follow-ups in 1.5 s on a 131k document
 
 Read a 131k-token document once (~218 s), then ask follow-up questions that start answering in
-**1.46–1.54 s**: the conversation's cache is restored instead of re-reading the document. The cache
-can also be saved to disk, so a long document survives a restart.
+**1.46–1.54 s**: the conversation's cache is restored instead of re-reading the document. Saving that cache
+to disk, so a document survives a server restart, passes our exactness tests; its Mac timing is not measured yet.
 
 ## Why it's fast
 
-- **Compiled decode step:** each token runs as one compiled MLX graph instead of ~13k freshly built nodes, cutting CPU overhead per token.
+- **Compiled decode step:** each token runs through one compiled MLX function instead of a freshly built graph of ~13k nodes, cutting CPU overhead per token.
 - **Exact, memory-lean prefill:** logits only for the last token, per-chunk embeddings, KV allocated once, so bigger chunks fit and 32k peak memory drops from 26 to 22 GiB.
 - **Attention and MoE kernel tuning:** larger attention tiles and a sort-free expert path, value-identical to the original.
 - **Prefix cache:** the fused attention kernel stays on after a cached prefix is restored, so follow-ups skip the long re-read.
