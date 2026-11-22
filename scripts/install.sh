@@ -66,6 +66,8 @@ if [ "$DRAFT" = 1 ]; then
     # Draft head proposes from a 16k candidate list (+ prompt ids) with a compiled Markov loop; same tokens.
     (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0016-draft-vocab-compiled-markov.patch")
     cp "$HERE/../data/draft_vocab_order.json" stacked/mlx_vlm/speculative/drafters/inkling2_dspark/
+    # Server single-request draft path: pass the prompt ids to the draft head like generate_step does.
+    (cd stacked && patch -p1 --no-backup-if-mismatch < "$HERE/../patches/0017-server-draft-prompt-ids.patch")
 fi
 [ -x "$ROOT/venv/bin/python" ] || "$PYBIN" -m venv "$ROOT/venv"
 "$ROOT/venv/bin/pip" install --quiet --upgrade pip

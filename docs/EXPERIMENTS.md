@@ -200,3 +200,19 @@ with a draft model, the same tokens as without it.
   Studio 1, unfinished; no results recorded from them.
 - README rewritten as charts + short text (`scripts/charts.py` → `docs/img/*.svg`); old tables moved to BENCHMARKS.
   "Fastest" dropped from the headline: the server head-to-head does not support it.
+
+## 2026-11-22 19:27– CET: server rows (Tomas 19:27: beat MLX-Serve on all four Studio 2 server rows)
+
+- **Same-prompt CLI vs server (Studio 1, stack16, defaults):** CLI drafted on MLX-Serve's own prompts: 4k 84.8, 32k
+  84.8 tok/s (prefill 1020 / 936); server: 4k ~72, 32k ~66 (scaled from Studio 2's 68.9 / 63.1). Same per-round
+  time; the server simply ran more rounds.
+- **Root cause 1 (fixed, 0017):** the server's single-request draft path never handed the prompt's token ids to the
+  draft head, so 0016's candidate list lacked the prompt's vocabulary (generate_step sets `_lookup_prompt_ids`).
+  0017 sets it in the plain-spec branch. Studio 1 server: 4k 83.4–83.8, 32k 78.1–78.3 (a17). Studio 2 server (g17):
+  4k 80.2 / 80.6 (was 68.2 / 68.9; MLX-Serve 66.1), 32k 74.6 then 55.6 (the last 32k run had prefill 745 tok/s:
+  another job on the GPU; needs a clean re-run). Reading unchanged (977–985 / 865).
+- Server kill bug in our bench script on Studio 1: `kill $SP` left the server alive, the next run's health check hit
+  the old server. Fixed (wait for exit, kill -9 fallback, wait for the port to be free); rb2/rb4 re-run.
+- **Server reading sweep (Studio 1, stack17, warm run):** step 2048: 1064.0 / 938.7; step 4096: 1043.4 / 921.1;
+  without `MLX_MAX_MB_PER_BUFFER=2`: 1034.8 / 920.9 (2048), 995.8 / 901.0 (4096); 4096 + `EVAL_EVERY=0`: 1033.8 /
+  935.2. Keep the defaults (2048, MB 2, eval every chunk).

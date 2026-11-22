@@ -1,0 +1,28 @@
+diff -ruN a/mlx_vlm/generate/ar.py b/mlx_vlm/generate/ar.py
+--- a/mlx_vlm/generate/ar.py	2026-11-22 19:30:07.001355676 +0100
++++ b/mlx_vlm/generate/ar.py	2026-11-22 19:30:26.897381632 +0100
+@@ -1867,6 +1867,14 @@
+             self._release()
+ 
+     def _release(self):
++        if os.environ.get("MLX_VLM_INKLING2_SPEC_LOG", "0") == "1":
++            dm = self.draft_model
++            acc = list(getattr(dm, "accept_lens", []) or [])
++            prof = dm.__dict__.get("_round_profile")
++            logging.getLogger(__name__).info(
++                "Speculative stats: rounds=%d accepted=%d drafted=%d profile=%s",
++                len(acc), sum(acc), sum(getattr(dm, "draft_lens", []) or []), prof,
++            )
+         # A finished batch stays installed as the generator's batch until the
+         # next request's prefill completes; holding its prompt cache that long
+         # keeps a dead copy of the whole context resident during that prefill.
+@@ -2296,6 +2304,9 @@
+         ):
+             self.prompt_cache = cache.make_prompt_cache(model)
+             self._plain_spec = True
++            # Same as generate_step: the draft head sees the prompt's ids (0016 adds them
++            # to its candidate list; dflash rounds pop them at the first round).
++            draft_model.__dict__["_lookup_prompt_ids"] = mx.array(input_ids[0]).reshape(1, -1)
+             _mt = max_tokens if isinstance(max_tokens, int) else max(max_tokens or [0])
+             _exact_reserve_kv(self.prompt_cache, max_length + int(_mt or 0) + 32)
+         elif draft_model is not None and draft_kind is not None:
