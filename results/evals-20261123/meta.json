@@ -1,0 +1,36 @@
+{
+  "started": "2026-11-23 08:24:19 CET",
+  "host": "Tomass-Mac-Studio-6.local",
+  "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+  "model": "/Users/tomascupr/inkling-mini/models/Inkling-2-Mini",
+  "recipe_commit": "fd26d84c1edb5b499792965981fbdcd8fcce2599",
+  "serve": "bash scripts/serve.sh 8080, MLX_VLM_TOKEN_QUEUE_TIMEOUT=3600, draft on, default TK=4",
+  "sampling": {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "max_tokens": 4096,
+    "reasoning_effort": "high",
+    "reasoning_effort_numeric": 0.9,
+    "thinking_mode": "on; reasoning_effort=high (model default 0.9)",
+    "n_samples": 1,
+    "greedy": true
+  },
+  "seed": 20261123,
+  "subsets": {
+    "gsm8k": "openai/gsm8k main test, random 200 of 1319, seed 20261123",
+    "mmlu_pro": "TIGER-Lab/MMLU-Pro test, random 200, seed 20261123",
+    "gpqa_diamond": "Idavidrein/gpqa gpqa_diamond, full set (198); choices shuffled per item with seed",
+    "aime2025": "math-ai/aime25 test, full set (30), not subsampled"
+  },
+  "scoring": {
+    "gsm8k": "numeric equality after extracting #### / \\boxed{} / last number from the assistant content (not the reasoning trace)",
+    "mmlu_pro": "letter A-J extracted from assistant content",
+    "gpqa_diamond": "letter A-D extracted from assistant content",
+    "aime2025": "integer 0-999 from \\boxed{} or answer line in assistant content"
+  },
+  "hf_model_card": {
+    "url": "https://huggingface.co/thinkingmachines/Inkling-2-Mini",
+    "note": "The official card table does not report GSM8K, MMLU-Pro, GPQA Diamond, or AIME 2025, so no card scores are cited."
+  },
+  "finished": "2026-11-23 11:30:19 CET"
+}

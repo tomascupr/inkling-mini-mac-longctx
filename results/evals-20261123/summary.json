@@ -1,0 +1,51 @@
+{
+  "updated": "2026-11-23 11:30:19 CET",
+  "finished": true,
+  "tasks": {
+    "gsm8k": {
+      "task": "gsm8k",
+      "n_scheduled": 200,
+      "n_scored": 200,
+      "n_correct": 193,
+      "n_error": 0,
+      "n_truncated": 4,
+      "accuracy": 0.965,
+      "accuracy_pct": 96.5,
+      "seed": 20261123,
+      "elapsed_s": 2469.7106699943542
+    },
+    "mmlu_pro": {
+      "task": "mmlu_pro",
+      "n_scheduled": 200,
+      "n_scored": 200,
+      "n_correct": 138,
+      "n_error": 0,
+      "n_truncated": 52,
+      "accuracy": 0.69,
+      "accuracy_pct": 69.0,
+      "seed": 20261123,
+      "elapsed_s": 6865.635989904404
+    },
+    "gpqa_diamond": {
+      "task": "gpqa_diamond",
+      "skipped": true,
+      "reason": "dataset unavailable (see cache/*_subset.json)",
+      "n_scheduled": 0,
+      "n_scored": 0,
+      "n_correct": 0,
+      "accuracy": null
+    },
+    "aime2025": {
+      "task": "aime2025",
+      "n_scheduled": 30,
+      "n_scored": 30,
+      "n_correct": 11,
+      "n_error": 0,
+      "n_truncated": 19,
+      "accuracy": 0.36666666666666664,
+      "accuracy_pct": 36.7,
+      "seed": 20261123,
+      "elapsed_s": 1819.59082198143
+    }
+  }
+}

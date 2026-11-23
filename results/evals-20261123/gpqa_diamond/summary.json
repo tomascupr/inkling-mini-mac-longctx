@@ -1,0 +1,9 @@
+{
+  "task": "gpqa_diamond",
+  "skipped": true,
+  "reason": "dataset unavailable (see cache/*_subset.json)",
+  "n_scheduled": 0,
+  "n_scored": 0,
+  "n_correct": 0,
+  "accuracy": null
+}

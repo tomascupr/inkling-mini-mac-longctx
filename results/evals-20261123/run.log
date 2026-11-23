@@ -1,0 +1,489 @@
+preparing datasets 2026-11-23 08:24:19 CET
+GPQA_SKIP DatasetNotFoundError Dataset 'Idavidrein/gpqa' is a gated dataset on the Hub. Visit the dataset page at https://huggingface.co/datasets/Idavidrein/gpqa to ask for access.
+Ignoring part of dataset_info from the dataset card: The `splits` field in YAML is malformed or missing the name/num_examples/num_bytes fields
+Generating test split:   0%|          | 0/30 [00:00<?, ? examples/s]Generating test split: 100%|██████████| 30/30 [00:00<00:00, 4009.08 examples/s]
+{'gsm8k': 200, 'mmlu_pro': 200, 'gpqa_diamond': 0, 'aime2025': 30}
+=== gsm8k n=200 already_ok=0 2026-11-23 08:24:24 CET
+gsm8k 1/200 gsm8k-350 OK pred=8 gold=8 8.7s tokens=363 finish=stop
+gsm8k 2/200 gsm8k-14 OK pred=60 gold=60 7.3s tokens=323 finish=stop
+gsm8k 3/200 gsm8k-884 OK pred=50 gold=50 3.3s tokens=139 finish=stop
+gsm8k 4/200 gsm8k-605 OK pred=42 gold=42 8.2s tokens=363 finish=stop
+gsm8k 5/200 gsm8k-84 OK pred=15 gold=15 7.1s tokens=313 finish=stop
+gsm8k 6/200 gsm8k-187 OK pred=106 gold=106 17.7s tokens=790 finish=stop
+gsm8k 7/200 gsm8k-140 OK pred=20 gold=20 5.8s tokens=253 finish=stop
+gsm8k 8/200 gsm8k-229 OK pred=21 gold=21 8.6s tokens=383 finish=stop
+gsm8k 9/200 gsm8k-466 OK pred=1.00 gold=1 7.6s tokens=335 finish=stop
+gsm8k 10/200 gsm8k-991 OK pred=15 gold=15 40.7s tokens=2028 finish=stop
+gsm8k 11/200 gsm8k-639 OK pred=216 gold=216 5.5s tokens=243 finish=stop
+gsm8k 12/200 gsm8k-114 OK pred=6 gold=6 18.5s tokens=822 finish=stop
+gsm8k 13/200 gsm8k-222 OK pred=140 gold=140 3.0s tokens=123 finish=stop
+gsm8k 14/200 gsm8k-2 OK pred=70000 gold=70000 13.8s tokens=613 finish=stop
+gsm8k 15/200 gsm8k-708 OK pred=168 gold=168 5.9s tokens=256 finish=stop
+gsm8k 16/200 gsm8k-300 OK pred=78 gold=78 3.0s tokens=129 finish=stop
+gsm8k 17/200 gsm8k-16 OK pred=230 gold=230 15.7s tokens=696 finish=stop
+gsm8k 18/200 gsm8k-1290 OK pred=90 gold=90 5.6s tokens=245 finish=stop
+gsm8k 19/200 gsm8k-381 OK pred=67 gold=67 4.6s tokens=200 finish=stop
+gsm8k 20/200 gsm8k-1031 OK pred=5 gold=5 10.4s tokens=458 finish=stop
+gsm8k 21/200 gsm8k-621 OK pred=3000 gold=3000 4.8s tokens=207 finish=stop
+gsm8k 22/200 gsm8k-599 OK pred=48 gold=48 6.5s tokens=283 finish=stop
+gsm8k 23/200 gsm8k-246 OK pred=27000 gold=27000 12.0s tokens=532 finish=stop
+gsm8k 24/200 gsm8k-565 OK pred=5 gold=5 5.9s tokens=256 finish=stop
+gsm8k 25/200 gsm8k-569 OK pred=21 gold=21 5.9s tokens=261 finish=stop
+gsm8k 26/200 gsm8k-527 OK pred=48 gold=48 11.9s tokens=527 finish=stop
+gsm8k 27/200 gsm8k-271 OK pred=20 gold=20 12.8s tokens=568 finish=stop
+gsm8k 28/200 gsm8k-489 OK pred=-10 gold=-10 4.6s tokens=200 finish=stop
+gsm8k 29/200 gsm8k-1193 OK pred=9.00 gold=9 13.2s tokens=581 finish=stop
+gsm8k 30/200 gsm8k-696 OK pred=145 gold=145 20.5s tokens=917 finish=stop
+gsm8k 31/200 gsm8k-1124 OK pred=64 gold=64 9.6s tokens=422 finish=stop
+gsm8k 32/200 gsm8k-1267 OK pred=40 gold=40 5.5s tokens=237 finish=stop
+gsm8k 33/200 gsm8k-698 OK pred=720.00 gold=720 5.4s tokens=234 finish=stop
+gsm8k 34/200 gsm8k-924 NO pred=None gold=12 73.6s tokens=4096 finish=length
+gsm8k 35/200 gsm8k-453 OK pred=6400 gold=6400 6.4s tokens=281 finish=stop
+gsm8k 36/200 gsm8k-664 OK pred=32 gold=32 7.4s tokens=327 finish=stop
+gsm8k 37/200 gsm8k-277 OK pred=4 gold=4 7.1s tokens=308 finish=stop
+gsm8k 38/200 gsm8k-474 OK pred=80 gold=80 6.2s tokens=270 finish=stop
+gsm8k 39/200 gsm8k-1095 OK pred=270 gold=270 5.5s tokens=231 finish=stop
+gsm8k 40/200 gsm8k-1088 OK pred=30 gold=30 20.8s tokens=917 finish=stop
+gsm8k 41/200 gsm8k-1289 OK pred=101 gold=101 4.5s tokens=189 finish=stop
+gsm8k 42/200 gsm8k-782 OK pred=54 gold=54 30.8s tokens=1514 finish=stop
+gsm8k 43/200 gsm8k-505 OK pred=1600 gold=1600 53.4s tokens=2878 finish=stop
+gsm8k 44/200 gsm8k-1259 OK pred=7200 gold=7200 7.2s tokens=313 finish=stop
+gsm8k 45/200 gsm8k-733 OK pred=5 gold=5 12.4s tokens=548 finish=stop
+gsm8k 46/200 gsm8k-391 OK pred=15 gold=15 4.2s tokens=180 finish=stop
+gsm8k 47/200 gsm8k-915 OK pred=23 gold=23 3.1s tokens=125 finish=stop
+gsm8k 48/200 gsm8k-4 OK pred=20 gold=20 11.5s tokens=499 finish=stop
+gsm8k 49/200 gsm8k-148 OK pred=30 gold=30 7.2s tokens=313 finish=stop
+gsm8k 50/200 gsm8k-22 OK pred=7 gold=7 5.3s tokens=228 finish=stop
+gsm8k 51/200 gsm8k-645 OK pred=48 gold=48 4.5s tokens=190 finish=stop
+gsm8k 52/200 gsm8k-1022 OK pred=12 gold=12 8.2s tokens=354 finish=stop
+gsm8k 53/200 gsm8k-1120 OK pred=560 gold=560 4.7s tokens=198 finish=stop
+gsm8k 54/200 gsm8k-1219 OK pred=100 gold=100 3.8s tokens=163 finish=stop
+gsm8k 55/200 gsm8k-690 OK pred=5760 gold=5760 17.9s tokens=785 finish=stop
+gsm8k 56/200 gsm8k-1110 OK pred=60 gold=60 10.0s tokens=436 finish=stop
+gsm8k 57/200 gsm8k-450 OK pred=4 gold=4 20.3s tokens=892 finish=stop
+gsm8k 58/200 gsm8k-826 OK pred=27 gold=27 7.3s tokens=320 finish=stop
+gsm8k 59/200 gsm8k-933 OK pred=15 gold=15 7.9s tokens=339 finish=stop
+gsm8k 60/200 gsm8k-235 OK pred=10 gold=10 20.3s tokens=891 finish=stop
+gsm8k 61/200 gsm8k-609 OK pred=7 gold=7 8.3s tokens=365 finish=stop
+gsm8k 62/200 gsm8k-392 OK pred=34 gold=34 9.8s tokens=430 finish=stop
+gsm8k 63/200 gsm8k-888 NO pred=None gold=10 74.1s tokens=4096 finish=length
+gsm8k 64/200 gsm8k-511 OK pred=110 gold=110 4.2s tokens=177 finish=stop
+gsm8k 65/200 gsm8k-654 OK pred=2 gold=2 7.8s tokens=340 finish=stop
+gsm8k 66/200 gsm8k-1046 OK pred=189 gold=189 17.9s tokens=787 finish=stop
+gsm8k 67/200 gsm8k-552 OK pred=450 gold=450 68.1s tokens=3746 finish=stop
+gsm8k 68/200 gsm8k-431 OK pred=1 gold=1 6.0s tokens=253 finish=stop
+gsm8k 69/200 gsm8k-707 OK pred=8 gold=8 8.0s tokens=348 finish=stop
+gsm8k 70/200 gsm8k-789 OK pred=4 gold=4 8.2s tokens=350 finish=stop
+gsm8k 71/200 gsm8k-149 OK pred=16 gold=16 3.0s tokens=124 finish=stop
+gsm8k 72/200 gsm8k-247 OK pred=32 gold=32 5.2s tokens=219 finish=stop
+gsm8k 73/200 gsm8k-1066 OK pred=14 gold=14 6.7s tokens=286 finish=stop
+gsm8k 74/200 gsm8k-763 OK pred=100 gold=100 10.2s tokens=443 finish=stop
+gsm8k 75/200 gsm8k-600 OK pred=10 gold=10 3.0s tokens=120 finish=stop
+gsm8k 76/200 gsm8k-1109 OK pred=3 gold=3 9.1s tokens=400 finish=stop
+gsm8k 77/200 gsm8k-761 OK pred=27 gold=27 9.6s tokens=419 finish=stop
+gsm8k 78/200 gsm8k-1296 OK pred=335 gold=335 3.6s tokens=152 finish=stop
+gsm8k 79/200 gsm8k-504 OK pred=2 gold=2 9.4s tokens=403 finish=stop
+gsm8k 80/200 gsm8k-1305 OK pred=2325 gold=2325 6.0s tokens=259 finish=stop
+gsm8k 81/200 gsm8k-1284 OK pred=25 gold=25 20.4s tokens=890 finish=stop
+gsm8k 82/200 gsm8k-1165 OK pred=1248 gold=1248 17.5s tokens=761 finish=stop
+gsm8k 83/200 gsm8k-177 OK pred=350 gold=350 23.0s tokens=1043 finish=stop
+gsm8k 84/200 gsm8k-159 OK pred=15 gold=15 17.5s tokens=770 finish=stop
+gsm8k 85/200 gsm8k-520 OK pred=63 gold=63 6.9s tokens=292 finish=stop
+gsm8k 86/200 gsm8k-342 OK pred=87 gold=87 4.0s tokens=167 finish=stop
+gsm8k 87/200 gsm8k-288 OK pred=3 gold=3 5.7s tokens=247 finish=stop
+gsm8k 88/200 gsm8k-254 OK pred=84 gold=84 5.7s tokens=246 finish=stop
+gsm8k 89/200 gsm8k-990 OK pred=14 gold=14 14.8s tokens=642 finish=stop
+gsm8k 90/200 gsm8k-980 OK pred=90 gold=90 5.7s tokens=248 finish=stop
+gsm8k 91/200 gsm8k-528 OK pred=172 gold=172 11.3s tokens=496 finish=stop
+gsm8k 92/200 gsm8k-1230 OK pred=440 gold=440 5.7s tokens=239 finish=stop
+gsm8k 93/200 gsm8k-104 OK pred=500 gold=500 7.9s tokens=343 finish=stop
+gsm8k 94/200 gsm8k-953 OK pred=452 gold=452 26.4s tokens=1252 finish=stop
+gsm8k 95/200 gsm8k-162 OK pred=92 gold=92 8.0s tokens=350 finish=stop
+gsm8k 96/200 gsm8k-1258 OK pred=60 gold=60 8.2s tokens=360 finish=stop
+gsm8k 97/200 gsm8k-640 OK pred=43500 gold=43500 32.0s tokens=1595 finish=stop
+gsm8k 98/200 gsm8k-688 OK pred=100 gold=100 4.7s tokens=201 finish=stop
+gsm8k 99/200 gsm8k-523 OK pred=74 gold=74 13.0s tokens=563 finish=stop
+gsm8k 100/200 gsm8k-1072 OK pred=85 gold=85 7.8s tokens=341 finish=stop
+gsm8k 101/200 gsm8k-560 OK pred=45 gold=45 5.4s tokens=234 finish=stop
+gsm8k 102/200 gsm8k-1268 OK pred=20 gold=20 4.3s tokens=185 finish=stop
+gsm8k 103/200 gsm8k-478 OK pred=621 gold=621 4.7s tokens=200 finish=stop
+gsm8k 104/200 gsm8k-499 OK pred=10 gold=10 33.3s tokens=1662 finish=stop
+gsm8k 105/200 gsm8k-125 OK pred=10 gold=10 29.5s tokens=1441 finish=stop
+gsm8k 106/200 gsm8k-286 OK pred=90 gold=90 3.8s tokens=157 finish=stop
+gsm8k 107/200 gsm8k-1249 OK pred=56 gold=56 12.1s tokens=522 finish=stop
+gsm8k 108/200 gsm8k-1287 OK pred=84 gold=84 10.6s tokens=464 finish=stop
+gsm8k 109/200 gsm8k-1171 OK pred=3160 gold=3160 17.1s tokens=748 finish=stop
+gsm8k 110/200 gsm8k-339 OK pred=160 gold=160 5.6s tokens=241 finish=stop
+gsm8k 111/200 gsm8k-754 OK pred=89 gold=89 32.3s tokens=1602 finish=stop
+gsm8k 112/200 gsm8k-352 OK pred=21 gold=21 9.4s tokens=409 finish=stop
+gsm8k 113/200 gsm8k-630 OK pred=10 gold=10 5.8s tokens=245 finish=stop
+gsm8k 114/200 gsm8k-535 OK pred=16 gold=16 4.5s tokens=187 finish=stop
+gsm8k 115/200 gsm8k-147 OK pred=75 gold=75 47.9s tokens=2556 finish=stop
+gsm8k 116/200 gsm8k-799 OK pred=4 gold=4 4.0s tokens=170 finish=stop
+gsm8k 117/200 gsm8k-1119 NO pred=None gold=18 73.8s tokens=4096 finish=length
+gsm8k 118/200 gsm8k-9 OK pred=460 gold=460 7.1s tokens=307 finish=stop
+gsm8k 119/200 gsm8k-1114 OK pred=8 gold=8 7.1s tokens=309 finish=stop
+gsm8k 120/200 gsm8k-31 OK pred=80 gold=80 8.6s tokens=374 finish=stop
+gsm8k 121/200 gsm8k-720 OK pred=4 gold=4 4.2s tokens=179 finish=stop
+gsm8k 122/200 gsm8k-219 OK pred=54 gold=54 8.3s tokens=361 finish=stop
+gsm8k 123/200 gsm8k-268 OK pred=1375 gold=1375 4.9s tokens=210 finish=stop
+gsm8k 124/200 gsm8k-513 OK pred=300 gold=300 4.8s tokens=208 finish=stop
+gsm8k 125/200 gsm8k-86 OK pred=22 gold=22 21.5s tokens=954 finish=stop
+gsm8k 126/200 gsm8k-111 OK pred=16 gold=16 13.4s tokens=587 finish=stop
+gsm8k 127/200 gsm8k-1054 OK pred=2400 gold=2400 11.2s tokens=488 finish=stop
+gsm8k 128/200 gsm8k-139 OK pred=70 gold=70 28.0s tokens=1334 finish=stop
+gsm8k 129/200 gsm8k-515 NO pred=288 gold=160 8.5s tokens=371 finish=stop
+gsm8k 130/200 gsm8k-1068 OK pred=24 gold=24 15.0s tokens=656 finish=stop
+gsm8k 131/200 gsm8k-753 OK pred=128 gold=128 22.5s tokens=1012 finish=stop
+gsm8k 132/200 gsm8k-498 OK pred=40 gold=40 4.2s tokens=173 finish=stop
+gsm8k 133/200 gsm8k-157 OK pred=80 gold=80 29.2s tokens=1417 finish=stop
+gsm8k 134/200 gsm8k-432 OK pred=30 gold=30 6.3s tokens=272 finish=stop
+gsm8k 135/200 gsm8k-347 OK pred=36 gold=36 4.3s tokens=186 finish=stop
+gsm8k 136/200 gsm8k-205 OK pred=98 gold=98 14.8s tokens=645 finish=stop
+gsm8k 137/200 gsm8k-1040 OK pred=736 gold=736 6.3s tokens=268 finish=stop
+gsm8k 138/200 gsm8k-292 OK pred=75 gold=75 10.0s tokens=438 finish=stop
+gsm8k 139/200 gsm8k-1042 NO pred=3.50 gold=3 33.9s tokens=1695 finish=stop
+gsm8k 140/200 gsm8k-197 OK pred=6277 gold=6277 6.8s tokens=294 finish=stop
+gsm8k 141/200 gsm8k-399 OK pred=12 gold=12 8.5s tokens=372 finish=stop
+gsm8k 142/200 gsm8k-928 OK pred=60 gold=60 6.6s tokens=285 finish=stop
+gsm8k 143/200 gsm8k-1226 OK pred=90 gold=90 17.6s tokens=772 finish=stop
+gsm8k 144/200 gsm8k-880 NO pred=None gold=10 74.0s tokens=4096 finish=length
+gsm8k 145/200 gsm8k-95 OK pred=40 gold=40 9.7s tokens=424 finish=stop
+gsm8k 146/200 gsm8k-1231 OK pred=70 gold=70 5.6s tokens=242 finish=stop
+gsm8k 147/200 gsm8k-326 OK pred=14 gold=14 11.2s tokens=489 finish=stop
+gsm8k 148/200 gsm8k-163 NO pred=54 gold=50 22.0s tokens=981 finish=stop
+gsm8k 149/200 gsm8k-1170 OK pred=2 gold=2 6.3s tokens=274 finish=stop
+gsm8k 150/200 gsm8k-390 OK pred=12 gold=12 6.6s tokens=281 finish=stop
+gsm8k 151/200 gsm8k-433 OK pred=6 gold=6 8.4s tokens=365 finish=stop
+gsm8k 152/200 gsm8k-1015 OK pred=78 gold=78 4.3s tokens=184 finish=stop
+gsm8k 153/200 gsm8k-321 OK pred=1 gold=1 3.8s tokens=163 finish=stop
+gsm8k 154/200 gsm8k-1218 OK pred=225 gold=225 16.0s tokens=702 finish=stop
+gsm8k 155/200 gsm8k-182 OK pred=23 gold=23 27.5s tokens=1306 finish=stop
+gsm8k 156/200 gsm8k-1211 OK pred=448 gold=448 7.8s tokens=340 finish=stop
+gsm8k 157/200 gsm8k-57 OK pred=83 gold=83 6.9s tokens=298 finish=stop
+gsm8k 158/200 gsm8k-476 OK pred=5 gold=5 2.8s tokens=117 finish=stop
+gsm8k 159/200 gsm8k-115 OK pred=90 gold=90 14.1s tokens=611 finish=stop
+gsm8k 160/200 gsm8k-1224 OK pred=5 gold=5 3.5s tokens=150 finish=stop
+gsm8k 161/200 gsm8k-601 OK pred=104 gold=104 12.7s tokens=549 finish=stop
+gsm8k 162/200 gsm8k-718 OK pred=2 gold=2 4.6s tokens=193 finish=stop
+gsm8k 163/200 gsm8k-136 OK pred=6 gold=6 4.3s tokens=182 finish=stop
+gsm8k 164/200 gsm8k-1134 OK pred=7 gold=7 4.4s tokens=188 finish=stop
+gsm8k 165/200 gsm8k-507 OK pred=2.00 gold=2 4.4s tokens=188 finish=stop
+gsm8k 166/200 gsm8k-153 OK pred=48 gold=48 15.0s tokens=651 finish=stop
+gsm8k 167/200 gsm8k-315 OK pred=14 gold=14 12.0s tokens=528 finish=stop
+gsm8k 168/200 gsm8k-1071 OK pred=251 gold=251 49.0s tokens=2598 finish=stop
+gsm8k 169/200 gsm8k-1007 OK pred=34 gold=34 7.1s tokens=309 finish=stop
+gsm8k 170/200 gsm8k-1063 OK pred=320 gold=320 3.6s tokens=152 finish=stop
+gsm8k 171/200 gsm8k-1009 OK pred=1875 gold=1875 10.1s tokens=444 finish=stop
+gsm8k 172/200 gsm8k-1047 OK pred=10 gold=10 7.3s tokens=319 finish=stop
+gsm8k 173/200 gsm8k-1051 OK pred=15 gold=15 3.1s tokens=132 finish=stop
+gsm8k 174/200 gsm8k-1265 OK pred=36 gold=36 13.9s tokens=608 finish=stop
+gsm8k 175/200 gsm8k-279 OK pred=6 gold=6 8.3s tokens=358 finish=stop
+gsm8k 176/200 gsm8k-1137 OK pred=68 gold=68 38.1s tokens=1952 finish=stop
+gsm8k 177/200 gsm8k-540 OK pred=39 gold=39 16.8s tokens=732 finish=stop
+gsm8k 178/200 gsm8k-1260 OK pred=5 gold=5 6.4s tokens=274 finish=stop
+gsm8k 179/200 gsm8k-196 OK pred=120 gold=120 4.6s tokens=196 finish=stop
+gsm8k 180/200 gsm8k-595 OK pred=13 gold=13 8.1s tokens=348 finish=stop
+gsm8k 181/200 gsm8k-979 OK pred=50 gold=50 9.1s tokens=397 finish=stop
+gsm8k 182/200 gsm8k-1172 OK pred=93 gold=93 8.5s tokens=350 finish=stop
+gsm8k 183/200 gsm8k-685 OK pred=14 gold=14 4.8s tokens=184 finish=stop
+gsm8k 184/200 gsm8k-330 OK pred=31 gold=31 9.7s tokens=416 finish=stop
+gsm8k 185/200 gsm8k-705 OK pred=120 gold=120 3.6s tokens=153 finish=stop
+gsm8k 186/200 gsm8k-1079 OK pred=10 gold=10 8.0s tokens=349 finish=stop
+gsm8k 187/200 gsm8k-1178 OK pred=17 gold=17 2.8s tokens=118 finish=stop
+gsm8k 188/200 gsm8k-686 OK pred=80 gold=80 3.5s tokens=147 finish=stop
+gsm8k 189/200 gsm8k-975 OK pred=20 gold=20 6.2s tokens=269 finish=stop
+gsm8k 190/200 gsm8k-358 OK pred=20 gold=20 4.5s tokens=191 finish=stop
+gsm8k 191/200 gsm8k-559 OK pred=16 gold=16 9.3s tokens=403 finish=stop
+gsm8k 192/200 gsm8k-873 OK pred=12.00 gold=12 10.3s tokens=449 finish=stop
+gsm8k 193/200 gsm8k-274 OK pred=3200 gold=3200 4.6s tokens=198 finish=stop
+gsm8k 194/200 gsm8k-1200 OK pred=8 gold=8 4.6s tokens=199 finish=stop
+gsm8k 195/200 gsm8k-582 OK pred=129200 gold=129200 8.4s tokens=367 finish=stop
+gsm8k 196/200 gsm8k-766 OK pred=12 gold=12 3.8s tokens=163 finish=stop
+gsm8k 197/200 gsm8k-443 OK pred=59 gold=59 48.6s tokens=2580 finish=stop
+gsm8k 198/200 gsm8k-1076 OK pred=162.00 gold=162 7.4s tokens=325 finish=stop
+gsm8k 199/200 gsm8k-802 OK pred=6 gold=6 9.3s tokens=406 finish=stop
+gsm8k 200/200 gsm8k-1233 OK pred=81 gold=81 5.4s tokens=232 finish=stop
+=== gsm8k done scored=200/200 acc=96.5% errors=0 2026-11-23 09:05:34 CET
+=== mmlu_pro n=200 already_ok=0 2026-11-23 09:05:34 CET
+mmlu_pro 1/200 mmlu-pro-11323 OK pred=C gold=C 62.0s tokens=3420 finish=stop
+mmlu_pro 2/200 mmlu-pro-4818 OK pred=C gold=C 7.0s tokens=300 finish=stop
+mmlu_pro 3/200 mmlu-pro-6287 OK pred=B gold=B 15.9s tokens=694 finish=stop
+mmlu_pro 4/200 mmlu-pro-6986 OK pred=A gold=A 6.7s tokens=282 finish=stop
+mmlu_pro 5/200 mmlu-pro-3413 OK pred=G gold=G 7.6s tokens=318 finish=stop
+mmlu_pro 6/200 mmlu-pro-9794 OK pred=J gold=J 10.4s tokens=447 finish=stop
+mmlu_pro 7/200 mmlu-pro-271 NO pred=None gold=C 73.5s tokens=4096 finish=length
+mmlu_pro 8/200 mmlu-pro-155 OK pred=D gold=D 32.2s tokens=1612 finish=stop
+mmlu_pro 9/200 mmlu-pro-12151 OK pred=H gold=H 61.7s tokens=3431 finish=stop
+mmlu_pro 10/200 mmlu-pro-9260 OK pred=A gold=A 66.1s tokens=3631 finish=stop
+mmlu_pro 11/200 mmlu-pro-11650 NO pred=None gold=I 73.0s tokens=4096 finish=length
+mmlu_pro 12/200 mmlu-pro-3348 OK pred=A gold=A 45.9s tokens=2473 finish=stop
+mmlu_pro 13/200 mmlu-pro-3679 OK pred=A gold=A 16.7s tokens=722 finish=stop
+mmlu_pro 14/200 mmlu-pro-9427 OK pred=B gold=B 57.1s tokens=3090 finish=stop
+mmlu_pro 15/200 mmlu-pro-2151 OK pred=B gold=B 32.5s tokens=1615 finish=stop
+mmlu_pro 16/200 mmlu-pro-9683 OK pred=C gold=C 17.5s tokens=755 finish=stop
+mmlu_pro 17/200 mmlu-pro-1716 OK pred=B gold=B 38.6s tokens=2082 finish=stop
+mmlu_pro 18/200 mmlu-pro-138 OK pred=E gold=E 55.2s tokens=2980 finish=stop
+mmlu_pro 19/200 mmlu-pro-9619 OK pred=E gold=E 73.0s tokens=4076 finish=stop
+mmlu_pro 20/200 mmlu-pro-8833 NO pred=None gold=F 73.9s tokens=4096 finish=length
+mmlu_pro 21/200 mmlu-pro-8454 OK pred=F gold=F 15.7s tokens=681 finish=stop
+mmlu_pro 22/200 mmlu-pro-9914 OK pred=A gold=A 26.4s tokens=1320 finish=stop
+mmlu_pro 23/200 mmlu-pro-5664 OK pred=A gold=A 7.1s tokens=305 finish=stop
+mmlu_pro 24/200 mmlu-pro-9669 NO pred=None gold=G 72.4s tokens=4096 finish=length
+mmlu_pro 25/200 mmlu-pro-6728 NO pred=None gold=D 73.7s tokens=4096 finish=length
+mmlu_pro 26/200 mmlu-pro-6368 OK pred=B gold=B 20.0s tokens=888 finish=stop
+mmlu_pro 27/200 mmlu-pro-3701 OK pred=D gold=D 23.1s tokens=1072 finish=stop
+mmlu_pro 28/200 mmlu-pro-1040 NO pred=B gold=I 34.5s tokens=1753 finish=stop
+mmlu_pro 29/200 mmlu-pro-6168 OK pred=H gold=H 8.1s tokens=349 finish=stop
+mmlu_pro 30/200 mmlu-pro-10029 NO pred=None gold=F 73.9s tokens=4096 finish=length
+mmlu_pro 31/200 mmlu-pro-571 NO pred=None gold=D 74.0s tokens=4096 finish=length
+mmlu_pro 32/200 mmlu-pro-6012 OK pred=A gold=A 27.2s tokens=1312 finish=stop
+mmlu_pro 33/200 mmlu-pro-10308 OK pred=E gold=E 12.8s tokens=544 finish=stop
+mmlu_pro 34/200 mmlu-pro-2581 OK pred=B gold=B 28.6s tokens=1394 finish=stop
+mmlu_pro 35/200 mmlu-pro-3354 OK pred=C gold=C 20.8s tokens=1012 finish=stop
+mmlu_pro 36/200 mmlu-pro-6120 OK pred=H gold=H 6.6s tokens=286 finish=stop
+mmlu_pro 37/200 mmlu-pro-10443 OK pred=F gold=F 4.6s tokens=194 finish=stop
+mmlu_pro 38/200 mmlu-pro-5225 NO pred=None gold=I 74.0s tokens=4096 finish=length
+mmlu_pro 39/200 mmlu-pro-9532 OK pred=E gold=E 13.4s tokens=576 finish=stop
+mmlu_pro 40/200 mmlu-pro-10446 OK pred=B gold=B 27.8s tokens=1329 finish=stop
+mmlu_pro 41/200 mmlu-pro-10257 NO pred=None gold=H 74.1s tokens=4096 finish=length
+mmlu_pro 42/200 mmlu-pro-1567 NO pred=None gold=H 73.0s tokens=4096 finish=length
+mmlu_pro 43/200 mmlu-pro-7442 OK pred=I gold=I 16.2s tokens=691 finish=stop
+mmlu_pro 44/200 mmlu-pro-4267 OK pred=B gold=B 20.7s tokens=970 finish=stop
+mmlu_pro 45/200 mmlu-pro-8568 OK pred=I gold=I 6.3s tokens=269 finish=stop
+mmlu_pro 46/200 mmlu-pro-8040 OK pred=E gold=E 14.3s tokens=616 finish=stop
+mmlu_pro 47/200 mmlu-pro-8031 OK pred=C gold=C 3.9s tokens=163 finish=stop
+mmlu_pro 48/200 mmlu-pro-9244 OK pred=C gold=C 30.3s tokens=1505 finish=stop
+mmlu_pro 49/200 mmlu-pro-5042 NO pred=None gold=J 73.9s tokens=4096 finish=length
+mmlu_pro 50/200 mmlu-pro-3224 OK pred=C gold=C 15.5s tokens=675 finish=stop
+mmlu_pro 51/200 mmlu-pro-4796 OK pred=I gold=I 14.7s tokens=628 finish=stop
+mmlu_pro 52/200 mmlu-pro-4675 OK pred=A gold=A 16.4s tokens=715 finish=stop
+mmlu_pro 53/200 mmlu-pro-9453 OK pred=C gold=C 26.4s tokens=1294 finish=stop
+mmlu_pro 54/200 mmlu-pro-1384 NO pred=None gold=G 73.1s tokens=4096 finish=length
+mmlu_pro 55/200 mmlu-pro-10919 OK pred=G gold=G 31.4s tokens=1563 finish=stop
+mmlu_pro 56/200 mmlu-pro-11086 OK pred=D gold=D 7.6s tokens=330 finish=stop
+mmlu_pro 57/200 mmlu-pro-1051 NO pred=None gold=D 73.4s tokens=4096 finish=length
+mmlu_pro 58/200 mmlu-pro-2222 OK pred=B gold=B 21.0s tokens=921 finish=stop
+mmlu_pro 59/200 mmlu-pro-5778 OK pred=D gold=D 58.6s tokens=3190 finish=stop
+mmlu_pro 60/200 mmlu-pro-8634 OK pred=J gold=J 27.9s tokens=1383 finish=stop
+mmlu_pro 61/200 mmlu-pro-2548 OK pred=G gold=G 12.8s tokens=545 finish=stop
+mmlu_pro 62/200 mmlu-pro-6800 OK pred=H gold=H 17.9s tokens=790 finish=stop
+mmlu_pro 63/200 mmlu-pro-1585 NO pred=None gold=C 72.7s tokens=4096 finish=length
+mmlu_pro 64/200 mmlu-pro-2614 OK pred=G gold=G 14.5s tokens=615 finish=stop
+mmlu_pro 65/200 mmlu-pro-5333 OK pred=B gold=B 6.4s tokens=265 finish=stop
+mmlu_pro 66/200 mmlu-pro-120 OK pred=H gold=H 7.0s tokens=299 finish=stop
+mmlu_pro 67/200 mmlu-pro-2912 OK pred=J gold=J 30.5s tokens=1581 finish=stop
+mmlu_pro 68/200 mmlu-pro-5787 NO pred=D gold=G 7.8s tokens=333 finish=stop
+mmlu_pro 69/200 mmlu-pro-3699 OK pred=A gold=A 19.4s tokens=839 finish=stop
+mmlu_pro 70/200 mmlu-pro-5377 NO pred=H gold=F 29.7s tokens=1450 finish=stop
+mmlu_pro 71/200 mmlu-pro-2727 OK pred=D gold=D 5.4s tokens=232 finish=stop
+mmlu_pro 72/200 mmlu-pro-2128 NO pred=None gold=I 72.8s tokens=4096 finish=length
+mmlu_pro 73/200 mmlu-pro-8420 NO pred=None gold=B 73.8s tokens=4096 finish=length
+mmlu_pro 74/200 mmlu-pro-1414 NO pred=None gold=D 72.9s tokens=4096 finish=length
+mmlu_pro 75/200 mmlu-pro-5847 NO pred=None gold=C 73.5s tokens=4096 finish=length
+mmlu_pro 76/200 mmlu-pro-9637 OK pred=F gold=F 8.8s tokens=379 finish=stop
+mmlu_pro 77/200 mmlu-pro-11709 NO pred=None gold=A 73.6s tokens=4096 finish=length
+mmlu_pro 78/200 mmlu-pro-8706 OK pred=J gold=J 18.2s tokens=794 finish=stop
+mmlu_pro 79/200 mmlu-pro-1222 NO pred=None gold=H 73.0s tokens=4096 finish=length
+mmlu_pro 80/200 mmlu-pro-11055 NO pred=None gold=H 73.9s tokens=4096 finish=length
+mmlu_pro 81/200 mmlu-pro-1271 NO pred=None gold=E 72.3s tokens=4096 finish=length
+mmlu_pro 82/200 mmlu-pro-2679 OK pred=G gold=G 9.9s tokens=419 finish=stop
+mmlu_pro 83/200 mmlu-pro-1267 NO pred=None gold=E 72.2s tokens=4096 finish=length
+mmlu_pro 84/200 mmlu-pro-7985 NO pred=None gold=A 73.5s tokens=4096 finish=length
+mmlu_pro 85/200 mmlu-pro-5988 OK pred=H gold=H 15.1s tokens=652 finish=stop
+mmlu_pro 86/200 mmlu-pro-7639 OK pred=D gold=D 72.8s tokens=4056 finish=stop
+mmlu_pro 87/200 mmlu-pro-7798 OK pred=C gold=C 8.8s tokens=376 finish=stop
+mmlu_pro 88/200 mmlu-pro-8340 OK pred=A gold=A 9.1s tokens=394 finish=stop
+mmlu_pro 89/200 mmlu-pro-424 OK pred=C gold=C 13.0s tokens=547 finish=stop
+mmlu_pro 90/200 mmlu-pro-805 OK pred=B gold=B 9.2s tokens=385 finish=stop
+mmlu_pro 91/200 mmlu-pro-2841 OK pred=H gold=H 11.8s tokens=509 finish=stop
+mmlu_pro 92/200 mmlu-pro-11266 NO pred=B gold=I 23.9s tokens=1107 finish=stop
+mmlu_pro 93/200 mmlu-pro-2032 OK pred=I gold=I 7.9s tokens=338 finish=stop
+mmlu_pro 94/200 mmlu-pro-6630 NO pred=None gold=A 73.6s tokens=4096 finish=length
+mmlu_pro 95/200 mmlu-pro-11189 OK pred=F gold=F 22.0s tokens=1018 finish=stop
+mmlu_pro 96/200 mmlu-pro-2024 OK pred=G gold=G 4.6s tokens=194 finish=stop
+mmlu_pro 97/200 mmlu-pro-2812 OK pred=H gold=H 10.1s tokens=433 finish=stop
+mmlu_pro 98/200 mmlu-pro-7648 OK pred=I gold=I 14.2s tokens=609 finish=stop
+mmlu_pro 99/200 mmlu-pro-9422 NO pred=None gold=B 73.5s tokens=4096 finish=length
+mmlu_pro 100/200 mmlu-pro-6381 OK pred=F gold=F 3.3s tokens=137 finish=stop
+mmlu_pro 101/200 mmlu-pro-2648 OK pred=D gold=D 9.1s tokens=397 finish=stop
+mmlu_pro 102/200 mmlu-pro-12133 OK pred=B gold=B 18.5s tokens=810 finish=stop
+mmlu_pro 103/200 mmlu-pro-8113 OK pred=B gold=B 50.7s tokens=2712 finish=stop
+mmlu_pro 104/200 mmlu-pro-4376 OK pred=A gold=A 14.7s tokens=629 finish=stop
+mmlu_pro 105/200 mmlu-pro-2493 OK pred=I gold=I 6.2s tokens=257 finish=stop
+mmlu_pro 106/200 mmlu-pro-6177 OK pred=E gold=E 8.8s tokens=373 finish=stop
+mmlu_pro 107/200 mmlu-pro-6442 NO pred=None gold=F 73.7s tokens=4096 finish=length
+mmlu_pro 108/200 mmlu-pro-3717 OK pred=E gold=E 37.9s tokens=1939 finish=stop
+mmlu_pro 109/200 mmlu-pro-10715 OK pred=A gold=A 48.4s tokens=2615 finish=stop
+mmlu_pro 110/200 mmlu-pro-2465 OK pred=B gold=B 5.4s tokens=232 finish=stop
+mmlu_pro 111/200 mmlu-pro-10260 OK pred=H gold=H 15.2s tokens=666 finish=stop
+mmlu_pro 112/200 mmlu-pro-4226 OK pred=J gold=J 11.9s tokens=519 finish=stop
+mmlu_pro 113/200 mmlu-pro-6875 OK pred=A gold=A 10.0s tokens=428 finish=stop
+mmlu_pro 114/200 mmlu-pro-5870 OK pred=G gold=G 20.0s tokens=891 finish=stop
+mmlu_pro 115/200 mmlu-pro-3400 OK pred=E gold=E 7.9s tokens=336 finish=stop
+mmlu_pro 116/200 mmlu-pro-9927 NO pred=None gold=F 73.0s tokens=4096 finish=length
+mmlu_pro 117/200 mmlu-pro-3111 OK pred=D gold=D 10.9s tokens=469 finish=stop
+mmlu_pro 118/200 mmlu-pro-1870 NO pred=None gold=G 72.6s tokens=4096 finish=length
+mmlu_pro 119/200 mmlu-pro-9311 OK pred=D gold=D 5.7s tokens=244 finish=stop
+mmlu_pro 120/200 mmlu-pro-2144 NO pred=None gold=D 74.3s tokens=4096 finish=length
+mmlu_pro 121/200 mmlu-pro-6572 NO pred=None gold=D 73.4s tokens=4096 finish=length
+mmlu_pro 122/200 mmlu-pro-6810 NO pred=J gold=F 19.0s tokens=829 finish=stop
+mmlu_pro 123/200 mmlu-pro-6980 NO pred=None gold=G 73.6s tokens=4096 finish=length
+mmlu_pro 124/200 mmlu-pro-10365 NO pred=F gold=J 26.9s tokens=1297 finish=stop
+mmlu_pro 125/200 mmlu-pro-6278 NO pred=None gold=C 74.0s tokens=4096 finish=length
+mmlu_pro 126/200 mmlu-pro-10712 OK pred=E gold=E 8.8s tokens=365 finish=stop
+mmlu_pro 127/200 mmlu-pro-3729 OK pred=C gold=C 34.7s tokens=1772 finish=stop
+mmlu_pro 128/200 mmlu-pro-4413 NO pred=None gold=C 72.0s tokens=4096 finish=length
+mmlu_pro 129/200 mmlu-pro-2112 OK pred=E gold=E 6.5s tokens=270 finish=stop
+mmlu_pro 130/200 mmlu-pro-1773 NO pred=None gold=I 72.8s tokens=4096 finish=length
+mmlu_pro 131/200 mmlu-pro-12068 OK pred=D gold=D 22.2s tokens=1041 finish=stop
+mmlu_pro 132/200 mmlu-pro-4431 OK pred=H gold=H 16.8s tokens=744 finish=stop
+mmlu_pro 133/200 mmlu-pro-2363 OK pred=A gold=A 19.1s tokens=896 finish=stop
+mmlu_pro 134/200 mmlu-pro-3610 OK pred=F gold=F 26.0s tokens=1238 finish=stop
+mmlu_pro 135/200 mmlu-pro-8460 OK pred=E gold=E 9.3s tokens=398 finish=stop
+mmlu_pro 136/200 mmlu-pro-11024 NO pred=None gold=B 73.7s tokens=4096 finish=length
+mmlu_pro 137/200 mmlu-pro-3092 OK pred=J gold=J 12.3s tokens=530 finish=stop
+mmlu_pro 138/200 mmlu-pro-5303 OK pred=H gold=H 7.4s tokens=317 finish=stop
+mmlu_pro 139/200 mmlu-pro-7512 OK pred=J gold=J 12.9s tokens=553 finish=stop
+mmlu_pro 140/200 mmlu-pro-3484 OK pred=B gold=B 14.7s tokens=633 finish=stop
+mmlu_pro 141/200 mmlu-pro-8205 OK pred=B gold=B 62.7s tokens=3435 finish=stop
+mmlu_pro 142/200 mmlu-pro-372 OK pred=B gold=B 65.5s tokens=3601 finish=stop
+mmlu_pro 143/200 mmlu-pro-6515 OK pred=B gold=B 21.3s tokens=981 finish=stop
+mmlu_pro 144/200 mmlu-pro-4985 NO pred=H gold=B 41.7s tokens=2269 finish=stop
+mmlu_pro 145/200 mmlu-pro-2215 NO pred=None gold=E 73.4s tokens=4096 finish=length
+mmlu_pro 146/200 mmlu-pro-5540 OK pred=D gold=D 8.3s tokens=357 finish=stop
+mmlu_pro 147/200 mmlu-pro-9909 NO pred=None gold=C 72.8s tokens=4096 finish=length
+mmlu_pro 148/200 mmlu-pro-7730 OK pred=A gold=A 15.5s tokens=671 finish=stop
+mmlu_pro 149/200 mmlu-pro-4957 OK pred=A gold=A 18.9s tokens=843 finish=stop
+mmlu_pro 150/200 mmlu-pro-964 NO pred=None gold=H 71.8s tokens=4096 finish=length
+mmlu_pro 151/200 mmlu-pro-7479 OK pred=J gold=J 5.7s tokens=245 finish=stop
+mmlu_pro 152/200 mmlu-pro-3656 NO pred=C gold=B 48.2s tokens=2593 finish=stop
+mmlu_pro 153/200 mmlu-pro-1774 OK pred=B gold=B 31.0s tokens=1574 finish=stop
+mmlu_pro 154/200 mmlu-pro-2642 OK pred=A gold=A 12.9s tokens=556 finish=stop
+mmlu_pro 155/200 mmlu-pro-4260 OK pred=C gold=C 27.8s tokens=1357 finish=stop
+mmlu_pro 156/200 mmlu-pro-9274 OK pred=B gold=B 30.4s tokens=1529 finish=stop
+mmlu_pro 157/200 mmlu-pro-5538 NO pred=None gold=B 74.1s tokens=4096 finish=length
+mmlu_pro 158/200 mmlu-pro-4787 OK pred=H gold=H 9.4s tokens=401 finish=stop
+mmlu_pro 159/200 mmlu-pro-3929 OK pred=J gold=J 12.3s tokens=523 finish=stop
+mmlu_pro 160/200 mmlu-pro-12231 NO pred=None gold=I 72.4s tokens=4096 finish=length
+mmlu_pro 161/200 mmlu-pro-1826 NO pred=None gold=A 72.5s tokens=4096 finish=length
+mmlu_pro 162/200 mmlu-pro-3797 NO pred=None gold=B 73.7s tokens=4096 finish=length
+mmlu_pro 163/200 mmlu-pro-6184 NO pred=A gold=E 59.2s tokens=3232 finish=stop
+mmlu_pro 164/200 mmlu-pro-9795 OK pred=C gold=C 16.5s tokens=712 finish=stop
+mmlu_pro 165/200 mmlu-pro-6803 OK pred=F gold=F 25.0s tokens=1212 finish=stop
+mmlu_pro 166/200 mmlu-pro-2084 OK pred=G gold=G 6.7s tokens=286 finish=stop
+mmlu_pro 167/200 mmlu-pro-7681 OK pred=F gold=F 5.6s tokens=236 finish=stop
+mmlu_pro 168/200 mmlu-pro-6466 NO pred=None gold=D 73.8s tokens=4096 finish=length
+mmlu_pro 169/200 mmlu-pro-9050 OK pred=G gold=G 63.4s tokens=3480 finish=stop
+mmlu_pro 170/200 mmlu-pro-793 OK pred=C gold=C 7.6s tokens=320 finish=stop
+mmlu_pro 171/200 mmlu-pro-3818 NO pred=None gold=A 73.8s tokens=4096 finish=length
+mmlu_pro 172/200 mmlu-pro-9928 OK pred=A gold=A 7.6s tokens=318 finish=stop
+mmlu_pro 173/200 mmlu-pro-7547 OK pred=G gold=G 7.7s tokens=330 finish=stop
+mmlu_pro 174/200 mmlu-pro-6143 OK pred=E gold=E 12.4s tokens=540 finish=stop
+mmlu_pro 175/200 mmlu-pro-10267 NO pred=None gold=G 73.5s tokens=4096 finish=length
+mmlu_pro 176/200 mmlu-pro-7260 OK pred=G gold=G 21.0s tokens=987 finish=stop
+mmlu_pro 177/200 mmlu-pro-1127 NO pred=None gold=E 73.8s tokens=4096 finish=length
+mmlu_pro 178/200 mmlu-pro-11956 NO pred=None gold=D 73.5s tokens=4096 finish=length
+mmlu_pro 179/200 mmlu-pro-5959 NO pred=None gold=H 73.9s tokens=4096 finish=length
+mmlu_pro 180/200 mmlu-pro-12192 OK pred=C gold=C 11.8s tokens=515 finish=stop
+mmlu_pro 181/200 mmlu-pro-9711 OK pred=D gold=D 6.7s tokens=278 finish=stop
+mmlu_pro 182/200 mmlu-pro-8530 OK pred=B gold=B 24.7s tokens=1144 finish=stop
+mmlu_pro 183/200 mmlu-pro-6923 OK pred=B gold=B 21.1s tokens=978 finish=stop
+mmlu_pro 184/200 mmlu-pro-10076 OK pred=A gold=A 19.6s tokens=911 finish=stop
+mmlu_pro 185/200 mmlu-pro-9930 OK pred=J gold=J 7.2s tokens=309 finish=stop
+mmlu_pro 186/200 mmlu-pro-9026 OK pred=J gold=J 19.3s tokens=862 finish=stop
+mmlu_pro 187/200 mmlu-pro-1569 NO pred=None gold=A 70.0s tokens=4096 finish=length
+mmlu_pro 188/200 mmlu-pro-7307 OK pred=A gold=A 9.6s tokens=421 finish=stop
+mmlu_pro 189/200 mmlu-pro-7699 OK pred=E gold=E 6.0s tokens=250 finish=stop
+mmlu_pro 190/200 mmlu-pro-12012 OK pred=F gold=F 16.5s tokens=750 finish=stop
+mmlu_pro 191/200 mmlu-pro-11504 OK pred=C gold=C 3.8s tokens=161 finish=stop
+mmlu_pro 192/200 mmlu-pro-8603 OK pred=C gold=C 40.3s tokens=2102 finish=stop
+mmlu_pro 193/200 mmlu-pro-8323 OK pred=A gold=A 22.1s tokens=1032 finish=stop
+mmlu_pro 194/200 mmlu-pro-191 OK pred=D gold=D 8.7s tokens=371 finish=stop
+mmlu_pro 195/200 mmlu-pro-7559 OK pred=F gold=F 8.3s tokens=358 finish=stop
+mmlu_pro 196/200 mmlu-pro-10171 OK pred=C gold=C 3.3s tokens=135 finish=stop
+mmlu_pro 197/200 mmlu-pro-1699 NO pred=B gold=D 45.0s tokens=2487 finish=stop
+mmlu_pro 198/200 mmlu-pro-12056 NO pred=None gold=D 72.4s tokens=4096 finish=length
+mmlu_pro 199/200 mmlu-pro-2070 NO pred=None gold=F 74.0s tokens=4096 finish=length
+mmlu_pro 200/200 mmlu-pro-2134 OK pred=J gold=J 11.7s tokens=498 finish=stop
+=== mmlu_pro done scored=200/200 acc=69.0% errors=0 2026-11-23 11:00:00 CET
+=== gpqa_diamond SKIPPED
+=== aime2025 n=30 already_ok=0 2026-11-23 11:00:00 CET
+aime2025 1/30 aime2025-0 OK pred=70 gold=70 17.9s tokens=781 finish=stop
+aime2025 2/30 aime2025-1 NO pred=None gold=588 73.6s tokens=4096 finish=length
+aime2025 3/30 aime2025-2 OK pred=16 gold=16 34.9s tokens=1767 finish=stop
+aime2025 4/30 aime2025-3 OK pred=117 gold=117 26.4s tokens=1237 finish=stop
+aime2025 5/30 aime2025-4 NO pred=None gold=279 74.0s tokens=4096 finish=length
+aime2025 6/30 aime2025-5 OK pred=504 gold=504 28.1s tokens=1351 finish=stop
+aime2025 7/30 aime2025-6 NO pred=None gold=821 73.7s tokens=4096 finish=length
+aime2025 8/30 aime2025-7 OK pred=77 gold=77 51.4s tokens=2756 finish=stop
+aime2025 9/30 aime2025-8 NO pred=None gold=62 73.9s tokens=4096 finish=length
+aime2025 10/30 aime2025-9 NO pred=None gold=81 71.1s tokens=4096 finish=length
+aime2025 11/30 aime2025-10 NO pred=None gold=259 69.8s tokens=4096 finish=length
+aime2025 12/30 aime2025-11 NO pred=None gold=510 73.9s tokens=4096 finish=length
+aime2025 13/30 aime2025-12 NO pred=None gold=204 74.1s tokens=4096 finish=length
+aime2025 14/30 aime2025-13 NO pred=None gold=60 73.8s tokens=4096 finish=length
+aime2025 15/30 aime2025-14 NO pred=None gold=735 74.0s tokens=4096 finish=length
+aime2025 16/30 aime2025-15 OK pred=468 gold=468 31.6s tokens=1559 finish=stop
+aime2025 17/30 aime2025-16 OK pred=49 gold=49 17.2s tokens=754 finish=stop
+aime2025 18/30 aime2025-17 NO pred=None gold=82 73.4s tokens=4096 finish=length
+aime2025 19/30 aime2025-18 OK pred=106 gold=106 42.3s tokens=2234 finish=stop
+aime2025 20/30 aime2025-19 NO pred=None gold=336 71.6s tokens=4096 finish=length
+aime2025 21/30 aime2025-20 OK pred=293 gold=293 67.1s tokens=3858 finish=stop
+aime2025 22/30 aime2025-21 OK pred=237 gold=237 35.5s tokens=1792 finish=stop
+aime2025 23/30 aime2025-22 NO pred=None gold=610 73.2s tokens=4096 finish=length
+aime2025 24/30 aime2025-23 NO pred=None gold=149 74.1s tokens=4096 finish=length
+aime2025 25/30 aime2025-24 OK pred=907 gold=907 73.6s tokens=4068 finish=stop
+aime2025 26/30 aime2025-25 NO pred=None gold=113 74.1s tokens=4096 finish=length
+aime2025 27/30 aime2025-26 NO pred=None gold=19 73.5s tokens=4096 finish=length
+aime2025 28/30 aime2025-27 NO pred=None gold=248 73.8s tokens=4096 finish=length
+aime2025 29/30 aime2025-28 NO pred=None gold=104 74.0s tokens=4096 finish=length
+aime2025 30/30 aime2025-29 NO pred=None gold=240 74.0s tokens=4096 finish=length
+=== aime2025 done scored=30/30 acc=36.7% errors=0 2026-11-23 11:30:19 CET
+ALL_DONE {
+  "gsm8k": {
+    "task": "gsm8k",
+    "n_scheduled": 200,
+    "n_scored": 200,
+    "n_correct": 193,
+    "n_error": 0,
+    "n_truncated": 4,
+    "accuracy": 0.965,
+    "accuracy_pct": 96.5,
+    "seed": 20261123,
+    "elapsed_s": 2469.7106699943542
+  },
+  "mmlu_pro": {
+    "task": "mmlu_pro",
+    "n_scheduled": 200,
+    "n_scored": 200,
+    "n_correct": 138,
+    "n_error": 0,
+    "n_truncated": 52,
+    "accuracy": 0.69,
+    "accuracy_pct": 69.0,
+    "seed": 20261123,
+    "elapsed_s": 6865.635989904404
+  },
+  "gpqa_diamond": {
+    "task": "gpqa_diamond",
+    "skipped": true,
+    "reason": "dataset unavailable (see cache/*_subset.json)",
+    "n_scheduled": 0,
+    "n_scored": 0,
+    "n_correct": 0,
+    "accuracy": null
+  },
+  "aime2025": {
+    "task": "aime2025",
+    "n_scheduled": 30,
+    "n_scored": 30,
+    "n_correct": 11,
+    "n_error": 0,
+    "n_truncated": 19,
+    "accuracy": 0.36666666666666664,
+    "accuracy_pct": 36.7,
+    "seed": 20261123,
+    "elapsed_s": 1819.59082198143
+  }
+}

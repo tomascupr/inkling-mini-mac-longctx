@@ -1,0 +1,12 @@
+{
+  "task": "mmlu_pro",
+  "n_scheduled": 200,
+  "n_scored": 200,
+  "n_correct": 138,
+  "n_error": 0,
+  "n_truncated": 52,
+  "accuracy": 0.69,
+  "accuracy_pct": 69.0,
+  "seed": 20261123,
+  "elapsed_s": 6865.635989904404
+}

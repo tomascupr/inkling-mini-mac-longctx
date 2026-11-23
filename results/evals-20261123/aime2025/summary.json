@@ -1,0 +1,12 @@
+{
+  "task": "aime2025",
+  "n_scheduled": 30,
+  "n_scored": 30,
+  "n_correct": 11,
+  "n_error": 0,
+  "n_truncated": 19,
+  "accuracy": 0.36666666666666664,
+  "accuracy_pct": 36.7,
+  "seed": 20261123,
+  "elapsed_s": 1819.59082198143
+}
