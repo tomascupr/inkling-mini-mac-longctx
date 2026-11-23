@@ -1,17 +1,17 @@
 # Faster Inkling 2 Mini
 
 **Optimised quality at highest speed.** Inkling 2 Mini with the official weights exactly as shipped, on an M4 Max Mac
-Studio. It writes faster than MLX-Serve at 4k, 32k, 131k and 262k and reads faster at 32k, 131k and 262k; at 4k, reading is level.
+Studio. It writes faster than MLX-Serve at 4k, 32k, 131k, 262k and 524k and reads faster at 32k, 131k, 262k and 524k; at 4k, reading is level.
 
 No requantizing, no FP8 KV cache, no sparse or approximate attention, and the outputs match the reference
 implementation. The speed comes from engineering alone: custom Metal kernels, a reworked server pipeline and fixes to
 the draft head.
 
-- **+5.4% faster writing** than MLX-Serve at 4k, **+4.3%** at 32k, **+9.6%** at 131k and **+18.3%** at 262k
-- **+3.2% faster reading** at 32k, **+4.7%** at 131k and **+6.2%** at 262k, **level** at 4k
+- **+5.4% faster writing** than MLX-Serve at 4k, **+4.3%** at 32k, **+9.6%** at 131k, **+18.3%** at 262k and **+7.4%** at 524k
+- **+3.2% faster reading** at 32k, **+4.7%** at 131k, **+6.2%** at 262k and **+2.6%** at 524k, **level** at 4k
 - **8/8** greedy answers identical to the reference and **520/520** teacher-forced top-1 tokens on our quality gate
   ([on which stack](#quality))
-- The hidden fact found in **18/18** of our head-to-head answers
+- The hidden fact found in **20/20** of our head-to-head answers
 
 ## Quickstart
 
@@ -51,6 +51,7 @@ weights, the same prompts and their draft heads on. Every run is the server's ow
 | 32k (32,750 tokens) | 898.4 → 927.8, **+3.2%** | 72.6 → 75.7, **+4.3%** |
 | 131k (131,054 tokens) | 674.0 → 706.2, **+4.7%** | 51.7 → 56.6, **+9.6%** |
 | 262k (262,126 tokens) | 477.9 → 507.9, **+6.2%** | 32.1 → 38.0, **+18.3%** |
+| 524k (524,270 tokens) | 303.8 → 311.7, **+2.6%** | 16.1 → 17.3, **+7.4%** |
 
 <sub>Same-session runs on an M4 Max Mac Studio. Method and every raw run: [docs/BENCHMARKS.md](docs/BENCHMARKS.md#head-to-head-vs-mlx-serve).</sub>
 <!-- /gen:h2h-table -->

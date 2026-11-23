@@ -11,6 +11,8 @@ separately). MLX-Serve's first 4k request is its own 16-token warm-up.
 If dropping the first request leaves one side with a single run, and counting every run at that length yields a
 smaller (more conservative) delta, the headline, README table and charts use the all-runs figures; both variants
 are in docs/BENCHMARKS.md.
+If MLX-Serve completed only one full request at a length, that sole run is counted and our first request is still
+dropped; that is the headline when it is more conservative than counting our first too.
 Rounding never favours this repo: its means are rounded down, MLX-Serve's up, differences (from unrounded means) down.
 Verdict: "faster" only if, in every session, our slowest counted run beats MLX-Serve's fastest one; "behind" if
 MLX-Serve's slowest beats our fastest in every session; otherwise "level".
@@ -114,12 +116,20 @@ def load_pair(mlxserve_log, ours_log):
     us = read_ours(open(os.path.join(H2H, ours_log)).read())
     out = {}
     for p in sorted(set(them) & set(us)):
-        if len(us[p]) < 2 or len(them[p]) < 2:
+        if len(us[p]) < 2:
             print(f"warning: {ours_log}: {len(them[p])} MLX-Serve and {len(us[p])} own request(s) at {p} tokens, "
                   "nothing left on one side after its first request")
             continue
-        out[p] = {"mlxserve_first": them[p][0], "mlxserve": [x[:2] for x in them[p][1:]],
-                  "first": us[p][0], "ours": us[p][1:]}
+        if len(them[p]) == 1:
+            # Sole MLX-Serve request at this length is counted (cannot drop first).
+            out[p] = {"mlxserve_first": them[p][0], "mlxserve": [them[p][0][:2]],
+                      "first": us[p][0], "ours": us[p][1:], "mlxserve_keep_first": True}
+        elif len(them[p]) >= 2:
+            out[p] = {"mlxserve_first": them[p][0], "mlxserve": [x[:2] for x in them[p][1:]],
+                      "first": us[p][0], "ours": us[p][1:], "mlxserve_keep_first": False}
+        else:
+            print(f"warning: {ours_log}: {len(them[p])} MLX-Serve and {len(us[p])} own request(s) at {p} tokens, "
+                  "nothing left on one side after its first request")
     return out
 
 
@@ -153,9 +163,16 @@ def analyse(sessions):
                 o = [x[k] for x in d["ours"]]
                 with_first = [d["first"][k]] + o
                 ms_first, warmup = d["mlxserve_first"][k], d["mlxserve_first"][2] <= 16
-                both = None if warmup else ([ms_first] + t, with_first)
+                keep = d.get("mlxserve_keep_first", False)
+                if keep:
+                    both = (t, with_first)
+                elif warmup:
+                    both = None
+                else:
+                    both = ([ms_first] + t, with_first)
                 per.append(dict(session=s["name"], started=s["started"], mlxserve=t, ours=o, first=d["first"][k],
                                 mlxserve_first=ms_first, mlxserve_first_is_warmup=warmup,
+                                mlxserve_keep_first=keep,
                                 delta=pct(o, t), verdict=session_verdict(o, t),
                                 delta_with_first=pct(with_first, t), verdict_with_first=session_verdict(with_first, t),
                                 delta_both=both and pct(both[1], both[0]),
@@ -164,7 +181,13 @@ def analyse(sessions):
             o_all = [x for r in per for x in r["ours"]]
             f_all = [r["first"] for r in per] + o_all
             full = all(not r["mlxserve_first_is_warmup"] for r in per)
-            t_both = [r["mlxserve_first"] for r in per] + t_all
+            t_both = []
+            for r in per:
+                if r["mlxserve_keep_first"] or r["mlxserve_first_is_warmup"]:
+                    t_both.extend(r["mlxserve"])
+                else:
+                    t_both.append(r["mlxserve_first"])
+                    t_both.extend(r["mlxserve"])
             row = dict(prompt=p, label=label(p), metric=metric, sessions=per,
                        mlxserve=t_all, ours=o_all, mlxserve_mean=mean(t_all), ours_mean=mean(o_all),
                        delta=pct(o_all, t_all), verdict=overall([r["verdict"] for r in per]),
@@ -257,6 +280,17 @@ def bench_pooled(rows):
                 f"{r['label']} {r['metric']}: the headline is the mean of every run, not the drop-first mean "
                 f"({fmt(up(r['mlxserve_mean']))} → {fmt(down(r['ours_mean']))}, {fmt_pct(r['delta'], 2)}). "
                 f"Dropping the first request leaves one side with a single run, and all-runs is more conservative.")
+    keeps = [r for r in rows if any(x.get("mlxserve_keep_first") for x in r["sessions"])]
+    if keeps:
+        if not extras:
+            lines.append("")
+        for r in keeps:
+            lines.append(
+                f"{r['label']} {r['metric']}: MLX-Serve completed one request; that sole run is counted. "
+                f"The headline drops our first request "
+                f"({fmt(up(r['headline_mlxserve_mean']))} → {fmt(down(r['headline_ours_mean']))}, "
+                f"{fmt_pct(r['headline_delta'], 2)}). Counting our first too would be "
+                f"{fmt_pct(r['delta_with_first'], 2)}.")
     return "\n".join(lines)
 
 
@@ -271,7 +305,12 @@ def bench_sessions(rows, sessions):
             for x in r["sessions"]:
                 if x["session"] != s["name"]:
                     continue
-                ms_first = fmt(x["mlxserve_first"]) + (" (16-token warm-up)" if x["mlxserve_first_is_warmup"] else "")
+                if x["mlxserve_first_is_warmup"]:
+                    ms_first = fmt(x["mlxserve_first"]) + " (16-token warm-up)"
+                elif x.get("mlxserve_keep_first"):
+                    ms_first = fmt(x["mlxserve_first"]) + " (only run, counted)"
+                else:
+                    ms_first = fmt(x["mlxserve_first"])
                 out.append(f"| {r['label']} | {r['metric']} | {ms_first} | {runs(x['mlxserve'])} "
                            f"| {fmt(up(mean(x['mlxserve'])))} | {fmt(x['first'])} | {runs(x['ours'])} "
                            f"| {fmt(down(mean(x['ours'])))} | {fmt_pct(x['delta'], 2)} | {x['verdict']} |")
@@ -284,8 +323,12 @@ def bench_first(rows):
              "Our first request counted, MLX-Serve's not | All runs counted | Headline |",
              "|---|---|---|---|---|---|---|"]
     for r in rows:
-        firsts = ", ".join(("16-token warm-up" if x["mlxserve_first_is_warmup"] else fmt(x["mlxserve_first"]))
-                           + f" → {fmt(x['first'])} ({x['session']})" for x in r["sessions"])
+        def _first_ms(x):
+            if x["mlxserve_first_is_warmup"]:
+                return "16-token warm-up"
+            lab = fmt(x["mlxserve_first"])
+            return lab + " (only run, counted)" if x.get("mlxserve_keep_first") else lab
+        firsts = ", ".join(_first_ms(x) + f" → {fmt(x['first'])} ({x['session']})" for x in r["sessions"])
         both = "– (MLX-Serve's is its 16-token warm-up)" if r["delta_both"] is None else \
             f"{fmt_pct(r['delta_both'], 2)}, {r['verdict_both']}"
         headline = "all runs" if r["headline_from"] == "all_runs" else "drop first"
@@ -380,6 +423,7 @@ def x_panel(ax, rows, title=None):
     ax.set_xlim(-0.58, len(rows) - 0.42)
     ax.set_ylim(0, top * 1.42)
     unit = ax.get_window_extent().width / (len(rows) + 0.16)
+    _closes = []
     for i, r in enumerate(rows):
         pair = ((i - w / 2 - gap, r["headline_mlxserve_mean"], X_THEIRS, x_val(up(r["headline_mlxserve_mean"]))),
                 (i + w / 2 + gap, r["headline_ours_mean"], X_OURS, x_val(down(r["headline_ours_mean"]))))
@@ -397,9 +441,17 @@ def x_panel(ax, rows, title=None):
             lift = top * (0.12 if close and j == 1 else 0.03)
             ax.text(xc, float(m) + lift, txt, ha="center", va="bottom", color=X_INK, fontweight="bold",
                     fontsize=fs)
-        txt = chart_delta(r)
-        ax.text(i, top * (1.22 if close else 1.16), txt, ha="center", va="bottom", fontweight="bold",
-                fontsize=fit(txt, unit * 0.85, 30),
+        # Delta labels are drawn once below, at a shared size that keeps neighbours apart.
+        _closes.append(close)
+    deltas = [chart_delta(r) for r in rows]
+    d_fs = min((fit(txt, unit * 0.80, 30) for txt in deltas), default=30)
+    for a, b in zip(deltas, deltas[1:]):
+        ems = text_em(a) + text_em(b)
+        if ems:
+            d_fs = min(d_fs, unit * 0.88 * 2 * 72 / X_DPI / ems)
+    for i, r in enumerate(rows):
+        ax.text(i, top * (1.22 if _closes[i] else 1.16), deltas[i], ha="center", va="bottom",
+                fontweight="bold", fontsize=d_fs,
                 color={"faster": X_GAIN, "behind": X_LOSS, "level": "#cbd5e1"}[r["headline_verdict"]])
     ticks = [r["label"] for r in rows]
     ax.set_xticks(range(len(rows)), ticks, fontsize=min(fit(t, unit * 0.7, 26) for t in ticks), color=X_INK)

@@ -4,7 +4,8 @@
   {"name": "h29", "log": "h2h29.log", "started": "2026-11-22 22:33 CET"},
   {"name": "h30", "log": "h2h30.log", "started": "2026-11-22 22:42 CET"},
   {"name": "h31", "log": "h2h31-131k.log", "started": "2026-11-22 23:10 CET"},
-  {"name": "h32", "log": "h2h32-262k.log", "started": "2026-11-22 23:15 CET"}
+  {"name": "h32", "log": "h2h32-262k.log", "started": "2026-11-22 23:15 CET"},
+  {"name": "h33", "log": "h2h33-524k.log", "started": "2026-11-22 23:38 CET"}
  ],
  "h2h_history": [
   {"name": "g17b", "started": "2026-11-22 19:52 CET", "mlxserve_log": "mlxserve-rerun-1952-draft-on.log", "ours_log": "srv-g17b.log",
