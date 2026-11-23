@@ -5,7 +5,7 @@ The companion to the README. Every number here comes from a file in this repo, n
 
 **Scope.** All claims are for the M4 Max Mac Studio (40-core GPU, 64 GB) and nothing else. We have two of them:
 *Studio 1* and *Studio 2*. Studio 2 runs about 5% slower than Studio 1 on the same code, so numbers are only compared
-within one machine. The 4k, 32k and 131k head-to-head vs MLX-Serve is on Studio 2; the 262k session is on Studio 1.
+within one machine. The 4k, 32k, 131k and 524k head-to-head vs MLX-Serve is on Studio 2; the 262k session is on Studio 1.
 
 **Model.** Official `thinkingmachines/Inkling-2-Mini` weights (Hub revision `ed40e7da`, NVFP4 + MXFP8) as shipped, bf16
 KV cache. No requantizing, no FP8 KV, no sparse or approximate attention, anywhere in this document.
@@ -22,13 +22,14 @@ Contents: [the claim](#the-claim) · [head-to-head vs MLX-Serve](#head-to-head-v
 | +5.4% faster writing at 4k, +4.3% at 32k | Sessions h29 and h30 below; our slowest counted run beats MLX-Serve's fastest in both sessions |
 | +9.6% faster writing at 131k | Session h31 (one session, 2 counted runs each side); our slowest counted run beats MLX-Serve's fastest |
 | +18.3% faster writing at 262k | Session h32 on Studio 1. Headline is every run (32.1 → 38.0), not the drop-first 30.4 → 38.7 (+27.3%), because dropping first leaves MLX-Serve with one run and its first run was faster than its second. Our slowest of the three still beats MLX-Serve's fastest of the two. |
-| +3.2% faster reading at 32k, +4.7% at 131k, +6.2% at 262k | Same tests: h29 and h30 at 32k, h31 at 131k, h32 at 262k (drop-first: 477.9 → 507.9) |
+| +7.4% faster writing at 524k | Session h33 on Studio 2. Headline is our drop-first run (17.3) against MLX-Serve's only counted run (16.1). All-runs on our side would be +8.7%; the headline is more conservative. See the 524k notes below. |
+| +3.2% faster reading at 32k, +4.7% at 131k, +6.2% at 262k, +2.6% at 524k | Same tests: h29 and h30 at 32k, h31 at 131k, h32 at 262k (drop-first: 477.9 → 507.9), h33 at 524k (drop-first ours 311.7 vs MLX-Serve's only run 303.8) |
 | Reading at 4k is level | Pooled +0.36%; in h30 the ranges overlap, so this is a tie, not a lead |
 | 8/8 greedy answers identical to the reference, 520/520 teacher-forced top-1 | Gate g26 on the stack through 0018 (not the exact final stack, see [quality](#quality-what-is-verified-on-what)) |
-| Hidden fact found in 18/18 of our head-to-head answers | `needle_found: True` on every request in `srv-h29.out` (6), `srv-h30.out` (6) and `srv-h31.out` (3); h32 session log (`h2h32-262k.log`) records true/true/true on our three 262k answers |
+| Hidden fact found in 20/20 of our head-to-head answers | `needle_found: True` on every request in `srv-h29.out` (6), `srv-h30.out` (6) and `srv-h31.out` (3); h32 session log (`h2h32-262k.log`) records true/true/true on our three 262k answers; h33 session log (`h2h33-524k.log`) records true/true on our two 524k answers |
 
 Not claimed: anything on other Macs; concurrent or batched requests (both servers ran one request at a time); prompts
-under 1,024 tokens (our draft head is off there); 524k and longer against MLX-Serve; the first request at a new prompt
+under 1,024 tokens (our draft head is off there); 1M against MLX-Serve; the first request at a new prompt
 length (usually slower on writing: ours at 4k and 32k, both servers' at 131k and ours at 262k; MLX-Serve's first 262k writing run was faster than its second; [disclosed below](#first-request-at-each-prompt-length)).
 
 ## Head-to-head vs MLX-Serve
@@ -36,32 +37,33 @@ length (usually slower on writing: ours at 4k and 32k, both servers' at 131k and
 ### Setup
 
 - **Machine and order.** Both servers in the same session on the same Mac, one at a time: MLX-Serve first,
-  stopped, then ours. 4k and 32k (h29, h30) and 131k (h31) ran on Studio 2; 262k (h32) ran on Studio 1. On 22 Nov
-  2026: h29 started 22:33 CET, h30 22:42 CET (4k and 32k), h31 23:10–23:29 CET (131k), h32 23:15–23:59 CET (262k).
-  The order was the same in every session (not alternated).
+  stopped, then ours. 4k and 32k (h29, h30), 131k (h31) and 524k (h33) ran on Studio 2; 262k (h32) ran on Studio 1. On 22 Nov
+  2026: h29 started 22:33 CET, h30 22:42 CET (4k and 32k), h31 23:10–23:29 CET (131k), h32 23:15–23:59 CET (262k),
+  h33 23:38 CET–23 Nov 01:16 CET (524k). The order was the same in every session (not alternated).
 - **Same model and prompts.** Both load the same weights directory (`thinkingmachines--Inkling-2-Mini`, about 18.19 GB)
   with bf16 KV (MLX-Serve logs `kv-quant: off`). Prompts: MLX-Serve's own needle prompts
-  `mlxserve/prompts/user-{4096,32768,131072}.txt` and the 262k needle prompt in h32 (4,078, 32,750, 131,054 and 262,126 prompt tokens), greedy (temperature 0),
+  `mlxserve/prompts/user-{4096,32768,131072,524288}.txt` and the 262k needle prompt in h32 (4,078, 32,750, 131,054, 262,126 and 524,270 prompt tokens), greedy (temperature 0),
   `max_tokens` 256, streaming, one request at a time. In h29 and h30 each server gets 4k three times, then 32k three
   times; in h31, 131k three times; in h32, MLX-Serve ran 262k twice after a 4k 16-token warm-up, and ours ran 262k three
-  times. MLX-Serve also gets a 16-token warm-up at 4k first in the Studio 2 sessions.
+  times; in h33, MLX-Serve ran 524k twice after a 4k 16-token warm-up (the second request was refused; see below), and ours ran 524k twice.
+  MLX-Serve also gets a 16-token warm-up at 4k first in the Studio 2 sessions.
 - **MLX-Serve.** `mlx-serve 26.11.4-pre-release.1` (ships MLX 0.32.5), its DSpark draft head (block 8), prefill chunk
-  4096 (its own memory-sized choice; in h32, memory-sized down from 8192), context 65,536 (163,840 in h31, 294,912 in h32),
-  `--max-concurrent=1` (h32 also `--timeout 7200`). Rate from its log line
+  4096 (its own memory-sized choice; in h32, memory-sized down from 8192), context 65,536 (163,840 in h31, 294,912 in h32, 557,056 in h33),
+  `--max-concurrent=1` (h32 also `--timeout 7200`; h33 `--timeout 0`). Rate from its log line
   `<- P+G tokens streamed [prefill: X tok/s, decode: Y tok/s]`. Full logs: `mlxserve-rerun-2233-draft-on.log` (h29),
   `mlxserve-rerun-2242-draft-on.log` (h30), `mlxserve-rerun-2310-draft-on.log` (h31); the request lines are copied
-  into `h2h29.log`, `h2h30.log`, `h2h31-131k.log` and `h2h32-262k.log` (h32's MLX-Serve full log was not committed).
+  into `h2h29.log`, `h2h30.log`, `h2h31-131k.log`, `h2h32-262k.log` and `h2h33-524k.log` (h32's and h33's MLX-Serve full logs were not committed).
 - **This repo.** `mlx_vlm.server` with every patch through 0019 (`scripts/install.sh`), mlx 0.32.4, the
   `scripts/serve.sh` settings: `scripts/env.sh` (draft head block 8, exact verify, confidence cut 0.65, 16,384-id
   candidate list), prefill step 8192, MLX buffer cache at the working-set size, async per-visit prefill eval,
   sliding-window attention in 64-query blocks; `--max-num-seqs 1`. Rate from the server's own log line
   (`LOG prompt_tokens=P ... prefill=X tok/s decode=Y tok/s`), copied into the session logs. Client records with the
-  needle check: `srv-h29.out`, `srv-h30.out`, `srv-h31.out` (h32 has no separate client record in the repo; the session
-  log itself records the needle check). The configuration is the one recorded in
-  `docs/EXPERIMENTS.md` (22:33, 22:42, 23:10 and 23:15 entries); no environment snapshot or full server log was committed for
-  these sessions. h32 used `scripts/serve.sh` plus the patch 0019 overlay copied from the Studio 2 h30 stack, with `BQ_SWA=64`.
-- **Token counts.** Each server counts its own: MLX-Serve logs 122 generated tokens at 4k, 125 at 32k and 131k, and 128 at 262k; ours
-  123, 126, 133 and 129. Rates are each server's tokens over its own time.
+  needle check: `srv-h29.out`, `srv-h30.out`, `srv-h31.out` (h32 and h33 have no separate client record in the repo; the session
+  logs themselves record the needle check). The configuration is the one recorded in
+  `docs/EXPERIMENTS.md` (22:33, 22:42, 23:10, 23:15 and 23:38 entries); no environment snapshot or full server log was committed for
+  these sessions. h32 and h33 used `scripts/serve.sh` plus the patch 0019 overlay copied from the Studio 2 h30 stack, with `BQ_SWA=64`.
+- **Token counts.** Each server counts its own: MLX-Serve logs 122 generated tokens at 4k, 125 at 32k and 131k, 128 at 262k, and 131 at 524k; ours
+  123, 126, 133, 129 and 132. Rates are each server's tokens over its own time.
 - All files are in `results/h2h-20261122/`.
 
 ### Counting and rounding
@@ -70,8 +72,10 @@ length (usually slower on writing: ours at 4k and 32k, both servers' at 131k and
   session on our side, and 3 at 4k and 2 at 32k and 131k on MLX-Serve's. At 262k MLX-Serve ran twice, so dropping first
   leaves it with one run. MLX-Serve's first 4k request is its own 16-token warm-up; at 32k, 131k and 262k its first
   request is a full one and is dropped like ours.
-  If that drop leaves one side with a single run, and the mean of every run at that length gives a smaller
-  1-decimal delta, the headline, README table and charts use the all-runs figures (262k writing only).
+  At 524k MLX-Serve completed only one request, so that sole run is counted; our first 524k request is still dropped.
+  If a drop-first would leave one side with a single run, and the mean of every run at that length gives a smaller
+  1-decimal delta, the headline, README table and charts use the all-runs figures (262k writing only). The 524k
+  headline stays on drop-first ours vs MLX-Serve's only run, which is more conservative than counting our first too.
   [The first requests and what counting them changes are below](#first-request-at-each-prompt-length).
 - Means are plain means of the server-reported rates. Shown to 0.1 with **ours rounded down and MLX-Serve's rounded
   up**. Differences (Δ) are computed from the unrounded means and rounded down. So no rounding favours this repo.
@@ -79,7 +83,7 @@ length (usually slower on writing: ours at 4k and 32k, both servers' at 131k and
   MLX-Serve's slowest beats our fastest in every session. Anything else is *level*. Per session the same test reads
   ahead / level / behind.
 
-### Results, pooled over sessions (h29 and h30 at 4k and 32k, h31 at 131k, h32 at 262k)
+### Results, pooled over sessions (h29 and h30 at 4k and 32k, h31 at 131k, h32 at 262k, h33 at 524k)
 
 <!-- gen:h2h-pooled -->
 | Prompt | | MLX-Serve mean (n, range) | This repo mean (n, range) | Δ | Verdict |
@@ -92,8 +96,12 @@ length (usually slower on writing: ours at 4k and 32k, both servers' at 131k and
 | 131k (131,054) | writing | 51.7 (2, 51.6–51.7) | 56.6 (2, 56.6–56.7) | +9.68% | +9.6% faster |
 | 262k (262,126) | reading | 477.9 (1, 477.9–477.9) | 507.9 (2, 507.8–508.0) | +6.27% | +6.2% faster |
 | 262k (262,126) | writing | 32.1 (2, 30.4–33.8) all runs | 38.0 (3, 36.6–38.7) all runs | +18.38% | +18.3% faster |
+| 524k (524,270) | reading | 303.8 (1, 303.8–303.8) | 311.7 (1, 311.7–311.7) | +2.60% | +2.6% faster |
+| 524k (524,270) | writing | 16.1 (1, 16.1–16.1) | 17.3 (1, 17.3–17.3) | +7.45% | +7.4% faster |
 
 262k writing: the headline is the mean of every run, not the drop-first mean (30.4 → 38.7, +27.30%). Dropping the first request leaves one side with a single run, and all-runs is more conservative.
+524k reading: MLX-Serve completed one request; that sole run is counted. The headline drops our first request (303.8 → 311.7, +2.60%). Counting our first too would be +4.34%.
+524k writing: MLX-Serve completed one request; that sole run is counted. The headline drops our first request (16.1 → 17.3, +7.45%). Counting our first too would be +8.69%.
 <!-- /gen:h2h-pooled -->
 
 ### Every run, per session
@@ -130,6 +138,13 @@ length (usually slower on writing: ours at 4k and 32k, both servers' at 131k and
 |---|---|---:|---|---:|---:|---|---:|---:|---|
 | 262k | reading | 478.0 | 477.9 | 477.9 | 507.4 | 508.0, 507.8 | 507.9 | +6.27% | ahead |
 | 262k | writing | 33.8 | 30.4 | 30.4 | 36.6 | 38.7, 38.7 | 38.7 | +27.30% | ahead |
+
+**h33**, started 2026-11-22 23:38 CET (`results/h2h-20261122/h2h33-524k.log`)
+
+| Prompt | | MLX-Serve first request (not counted) | MLX-Serve counted runs | Mean | Our first request (not counted) | Our counted runs | Mean | Δ | Same-session |
+|---|---|---:|---|---:|---:|---|---:|---:|---|
+| 524k | reading | 303.8 (only run, counted) | 303.8 | 303.8 | 322.3 | 311.7 | 311.7 | +2.60% | ahead |
+| 524k | writing | 16.1 (only run, counted) | 16.1 | 16.1 | 17.7 | 17.3 | 17.3 | +7.45% | ahead |
 <!-- /gen:h2h-sessions -->
 
 Notes on these numbers:
@@ -182,6 +197,8 @@ follows:
 | 131k | writing | 45.0 → 52.3 (h31) | +9.68%, faster | +6.87%, faster | +11.66%, faster | drop first |
 | 262k | reading | 478.0 → 507.4 (h32) | +6.27%, faster | +6.24%, faster | +6.23%, faster | drop first |
 | 262k | writing | 33.8 → 36.6 (h32) | +27.30%, faster | +25.00%, faster | +18.38%, faster | all runs |
+| 524k | reading | 303.8 (only run, counted) → 322.3 (h33) | +2.60%, faster | +4.34%, faster | +4.34%, faster | drop first |
+| 524k | writing | 16.1 (only run, counted) → 17.7 (h33) | +7.45%, faster | +8.69%, faster | +8.69%, faster | drop first |
 <!-- /gen:h2h-first -->
 
 Counting our first request but not MLX-Serve's is the harshest reading for us. It makes 4k level on both metrics (our
@@ -190,9 +207,17 @@ faster. Counting both sides' first requests leaves 32k writing level and widens 
 131k request is softer than ours; the headline keeps the warm-run +9.6%. At 262k, counting both sides' first requests
 leaves reading at +6.2% (same 1-decimal headline as drop-first) and cuts writing from +27.3% to +18.3%, because
 MLX-Serve's first writing run was faster than its second; that +18.3% is the README and chart figure. 262k reading
-stays on the drop-first means (477.9 → 507.9).
+stays on the drop-first means (477.9 → 507.9). At 524k, MLX-Serve completed only one request, so that sole run is
+counted and our first request is still dropped (303.8 → 311.7 reading, 16.1 → 17.3 writing). Counting our first too
+would be +4.3% / +8.7%; the headline keeps the more conservative drop-first figures.
 
-To add a session (for example 524k), list its log under `h2h_sessions` in `results/h2h-20261122/charts.json` and run
+**524k notes (h33, Studio 2).** MLX-Serve's second request was memory-refused (needed 25,399 MB, 18,496 MB available).
+Ours decoded without the draft (it switches off above 262,144 tokens); MLX-Serve drafted. An earlier attempt at our
+524k runs in the same session is discarded: the 600s default `MLX_VLM_TOKEN_QUEUE_TIMEOUT` aborted the client stream
+while prefill was still running, and a second request was started on top of it. Those numbers are not used. The
+counted runs are from a clean rematch with the timeout set to 3,600s.
+
+To add a session, list its log under `h2h_sessions` in `results/h2h-20261122/charts.json` and run
 `python scripts/charts.py`: the README table, the charts, the X renders and the tables above gain the new rows under
 the same counting, rounding and verdict rules.
 
@@ -233,8 +258,10 @@ The reference is the unpatched community fork (`betizzel/mlx-vlm` at `55ca2e9e`)
 18/18" in `docs/EXPERIMENTS.md`) and `9 VIOLET-ANCHOR-4729` in `h2h31-131k.log` ("all 6 answers" in
 `docs/EXPERIMENTS.md`). Our client records show `needle_found: True` on every one of our requests: 6 in `srv-h29.out`,
 6 in `srv-h30.out`, 3 in `srv-h31.out`. For h32, `h2h32-262k.log` records `needle_found true/true` (MLX-Serve) and
-`true/true/true` (ours), all `VIOLET-ANCHOR-4729` (5/5 in that session). No `srv-h32.out` was committed, so the
-README's 18/18 is our 15 from the client records plus our 3 from the h32 session log.
+`true/true/true` (ours), all `VIOLET-ANCHOR-4729` (5/5 in that session). For h33, `h2h33-524k.log` records
+`needle_found` true on MLX-Serve's completed request and true/true on our two 524k answers (the refused MLX-Serve
+request has no answer). No `srv-h32.out` or `srv-h33.out` was committed, so the README's 20/20 is our 15 from the
+client records plus our 3 from the h32 session log plus our 2 from the h33 session log.
 
 **What changed after gate g26, and how each change was checked:**
 
@@ -491,7 +518,7 @@ Details: `docs/trackA-prefill-notes.md`, `docs/trackB-decode-notes.md`, `docs/PR
 
 ## Not measured yet
 
-- A second 131k session, and a 524k or 1M head-to-head vs MLX-Serve.
+- A second 131k session, and a 1M head-to-head vs MLX-Serve.
 - The full quality gate on the exact final stack and the `serve.sh` settings (prefill step 8192).
 - Why the first request at a new prompt length writes more slowly (on both servers).
 - Concurrent requests: both servers were measured one request at a time.
