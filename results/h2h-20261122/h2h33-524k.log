@@ -1,0 +1,36 @@
+# Studio 2 same-session 524k head-to-head (h33), 2026-11-22 23:38:40–2026-11-23 01:16:25 CET (Europe/Prague)
+# MLX-Serve first (ddalcu, 26.11.4-pre-release.1, --ctx-size 557056 --timeout 0 --no-pld),
+# then ours (serve.sh + 0019 L2-clip + BQ_SWA=64, stack30, STEP=8192). Official Inkling-2-Mini
+# weights, same needle prompts (user-524288.txt), server-log tok/s, 2 runs each after a 4k
+# 16-token MLX-Serve warmup (not counted). Env kept as h31, including
+# MLX_VLM_INKLING2_DRAFT_MAX_CTX=262144.
+# Prompt tokens=524270 (server). Needle VIOLET-ANCHOR-4729. No QA gate.
+#
+# Incident: ours first attempt (00:07:47–00:20:51 CET) is invalid and discarded. Request
+# 12022a210 began prefill at 00:07:52. At 00:17:52 the server aborted the client stream:
+# "Timed out waiting for 600s for the next generated token. Increase
+# MLX_VLM_TOKEN_QUEUE_TIMEOUT for long prefills, or reduce the prompt size." Prefill was
+# still running (~54.7%). srv3.sh then started r=1 (request 74a0b20180) while 12022a210
+# was still prefilling, so two prefills overlapped. Those numbers are not used. Only the
+# ours server and client were stopped; MLX-Serve results were kept. Ours was rerun from
+# 00:20:51 with MLX_VLM_TOKEN_QUEUE_TIMEOUT=3600 and CLIENT_TIMEOUT=7200 (same stack/env
+# otherwise). Archived at ~/.exo-inkling-bench/exact-work/short/h33-invalid-0018/.
+mlxserve start 23:38:40
+23:38:44 server ready (rerun-2338-draft-on)
+  <- 4078+16 tokens streamed [prefill: 1101.2 tok/s, decode: 111.5 tok/s] [length]
+  <- 524270+131 tokens streamed [prefill: 303.8 tok/s, decode: 16.1 tok/s] [stop]
+[admission] needed=25399 MB available=26974 MB reclaimable=0 MB width=4096 verdict=admit  # r1
+[admission] needed=25399 MB available=18496 MB reclaimable=0 MB width=4096 verdict=refuse  # r2
+r2 error: HTTP 400 memory_refused: Prompt (524270 tokens) requires ~25399MB GPU memory but only ~18496MB is available and the hot prefix cache holds ~0MB more, all of which can be reclaimed (~0MB — the shortfall is elsewhere), which is not enough. Reduce prompt size, lower --ctx-size, or use a smaller model.
+r1 draft: spec=dspark (inkling2_loop native draft stages, block=8); attempts=13 accepts=45 avg_per_round=3.46
+needle_found true (r1); r2 refused (no answer)
+RERUN_DONE
+mlxserve log /Users/tomascupr/.exo-inkling-bench/mlxserve/logs/serve-rerun-2338-draft-on.log
+== ours h33 rematch 00:20:51–01:16:25 CET  STK=stack30 STEP=8192 TOKEN_QUEUE_TIMEOUT=3600
+# Drafter loaded at startup, but 524270 > MLX_VLM_INKLING2_DRAFT_MAX_CTX=262144, so
+# draft_model is set to None; both runs decoded without the draft (no per-request spec-log).
+LOG prompt_tokens=524270 generated_tokens=132 elapsed=1638.966s prefill=322.3 tok/s decode=17.7 tok/s finish_reason=stop in_flight=0
+LOG prompt_tokens=524270 generated_tokens=132 elapsed=1690.887s prefill=311.7 tok/s decode=17.3 tok/s finish_reason=stop in_flight=0
+needle_found true/true (ours r0/r1); both VIOLET-ANCHOR-4729
+SRVDONE
+H2H33OURS_DONE

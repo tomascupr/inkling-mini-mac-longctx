@@ -4,6 +4,30 @@ Plain log of what we tried after the 1M headline, including what failed. Times a
 Gates: bit-identical tokens + logprob sha256 vs the unpatched fork at 4k/32k/131k/262k; needle at 524k/1M;
 with a draft model, the same tokens as without it.
 
+## 2026-11-23
+
+- **S2 same session h33 (22 Nov 23:38–23 Nov 01:16 CET), 524k rematch, MLX-Serve then ours**
+  (`scripts/serve.sh` + patch 0019 + `BQ_SWA=64`; official checkpoint, same needle prompts,
+  server-log tok/s, env kept as h31 including `MLX_VLM_INKLING2_DRAFT_MAX_CTX=262144`). Prompt
+  524,270 tokens. MLX-Serve (`--ctx-size 557056 --timeout 0 --no-pld`) had a 4k 16-token warmup,
+  then r1 **303.8 / 16.1** (draft on: `spec=dspark`, 13 attempts, 45 accepts, avg 3.46; needle
+  found; admission 25,399 MB needed / 26,974 MB available) and r2 **memory_refused** (needed
+  25,399 MB, available 18,496 MB after r1, reclaimable 0 MB, hot prefix cache ~0 MB; no answer).
+  Ours first attempt (00:07:47–00:20:51) is invalid and discarded: the 600s default
+  `MLX_VLM_TOKEN_QUEUE_TIMEOUT` aborted the client stream at 00:17:52 while prefill was still
+  running, and srv3.sh started a second request on top of it. Only that ours server and client
+  were stopped; MLX-Serve results were kept. Clean rematch from 00:20:51 with
+  `MLX_VLM_TOKEN_QUEUE_TIMEOUT=3600` and `CLIENT_TIMEOUT=7200`: **322.3 / 17.7** and
+  **311.7 / 17.3** (needle found in both). The drafter loaded at startup, but both 524k runs
+  **decoded without the draft** because 524,270 > 262,144. All-runs (MLX-Serve has only one
+  counted run): MLX-Serve 303.8 / 16.1 vs ours median 317.0 / 17.5 (**reading +4.3%**,
+  **writing +8.7%**; writing is not like-for-like — theirs drafted, ours did not). Drop-first:
+  ours 311.7 / 17.3 (n=1); MLX-Serve has no remaining run, so there is no two-sided drop-first
+  comparison. Prefill and writing were slightly slower on our second run (no first-use writing
+  dip). 524k fit for one MLX-Serve request (~1.5 GB headroom) but not a second in the same
+  process; ours completed two sequential requests. Logs:
+  `results/h2h-20261122/h2h33-524k.log`.
+
 ## 2026-11-22
 
 - **18:05–18:45 — the server path was not using any of the decode work; fixed (patches 0014, 0015).** End-to-end check
